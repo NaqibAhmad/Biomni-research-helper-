@@ -24,6 +24,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from pydantic.json import pydantic_encoder
+from biomni.config import BiomniConfig 
+
+config = BiomniConfig()
 
 # Load environment variables from .env file if it exists
 try:
@@ -143,7 +146,7 @@ async def startup_event():
     """Initialize the agent on startup."""
     global agent
     try:
-        agent = initialize_agent()
+        agent = initialize_agent(config=config)
         logger.info("Biomni API server started successfully")
     except Exception as e:
         logger.error(f"Failed to initialize agent: {e}")
@@ -362,9 +365,10 @@ async def get_system_info():
         
         # Get current configuration
         config = {
-            "llm": agent.llm.model_name if hasattr(agent.llm, 'model_name') else "Unknown",
+            "llm": agent.llm.model,
             "source": getattr(agent, 'source', 'Unknown'),
             "use_tool_retriever": agent.use_tool_retriever,
+            "temperature": agent.llm.temperature,
             "timeout_seconds": agent.timeout_seconds,
             "path": agent.path
         }
