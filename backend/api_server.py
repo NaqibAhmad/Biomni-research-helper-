@@ -58,10 +58,23 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=[
+        "https://biomni-frontend-9q09.vercel.app",  # Fixed typo in domain
+        "https://biomni-frontend-9qo9.vercel.app",  # Keep the old one for backward compatibility
+        "http://localhost:3000",  # For local development
+        "http://localhost:5173",  # For Vite dev server
+        "*"  # Allow all origins for debugging (remove in production)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=[
+        'Content-Type',
+        'Authorization',
+        'ngrok-skip-browser-warning',
+        'Accept',
+        'Origin',
+        'X-Requested-With'
+    ],
 )
 
 # Global agent instance
@@ -327,13 +340,20 @@ async def get_system_info():
     """Get information about available tools, data lake, and software."""
     global agent
     
+    logger.info("System info endpoint called")
+    
     if agent is None:
+        logger.error("Agent is None - not initialized")
         raise HTTPException(status_code=500, detail="Agent not initialized")
     
     try:
+        logger.info(f"Agent path: {agent.path}")
+        logger.info(f"Agent module2api keys: {list(agent.module2api.keys())}")
+        
         # Get tools
         tools = []
         for module_name, module_tools in agent.module2api.items():
+            logger.info(f"Processing module: {module_name} with {len(module_tools)} tools")
             for tool in module_tools:
                 if tool.get("name") != "run_python_repl":  # Skip internal tool
                     tools.append(ToolInfo(
@@ -343,10 +363,14 @@ async def get_system_info():
                         parameters=tool.get("parameters", {})
                     ))
         
+        logger.info(f"Found {len(tools)} tools")
+        
         # Get data lake items
         data_lake_path = os.path.join(agent.path, "data_lake")
+        logger.info(f"Data lake path: {data_lake_path}")
         data_lake_items = []
         if os.path.exists(data_lake_path):
+            logger.info(f"Data lake directory exists, contents: {os.listdir(data_lake_path)}")
             for item in os.listdir(data_lake_path):
                 description = agent.data_lake_dict.get(item, f"Data lake item: {item}")
                 data_lake_items.append(DataLakeInfo(
@@ -354,14 +378,21 @@ async def get_system_info():
                     description=description,
                     path=os.path.join(data_lake_path, item)
                 ))
+        else:
+            logger.warning(f"Data lake directory does not exist: {data_lake_path}")
+        
+        logger.info(f"Found {len(data_lake_items)} data lake items")
         
         # Get software
         software = []
+        logger.info(f"Software library keys: {list(agent.library_content_dict.keys())}")
         for lib_name, lib_desc in agent.library_content_dict.items():
             software.append(SoftwareInfo(
                 name=lib_name,
                 description=lib_desc
             ))
+        
+        logger.info(f"Found {len(software)} software items")
         
         # Get current configuration
         config = {
@@ -373,15 +404,21 @@ async def get_system_info():
             "path": agent.path
         }
         
-        return SystemInfo(
+        logger.info(f"Configuration: {config}")
+        
+        result = SystemInfo(
             tools=tools,
             data_lake=data_lake_items,
             software=software,
             configuration=config
         )
         
+        logger.info(f"Returning system info with {len(tools)} tools, {len(data_lake_items)} data items, {len(software)} software items")
+        return result
+        
     except Exception as e:
         logger.error(f"Error getting system info: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/sessions")

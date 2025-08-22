@@ -39,6 +39,7 @@ def main():
         
         # Get configuration from environment variables
         host = os.getenv("BIOMNI_HOST", "0.0.0.0")
+        # host = "https://allowing-ultimately-roughy.ngrok-free.app"
         port = int(os.getenv("BIOMNI_PORT", "8000"))
         reload = os.getenv("BIOMNI_RELOAD", "true").lower() == "true"
         log_level = os.getenv("BIOMNI_LOG_LEVEL", "info")
