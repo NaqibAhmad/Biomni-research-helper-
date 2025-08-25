@@ -289,36 +289,6 @@ async def chat_stream(websocket: WebSocket, session_id: str):
         except:
             pass
 
-@app.websocket("/api/chat/stream/executor")
-async def executor_stream(websocket: WebSocket):
-    """WebSocket endpoint for streaming executor logs."""
-    global agent
-    
-    if agent is None:
-        await websocket.close(code=1008, reason="Agent not initialized")
-        return
-    
-    await websocket.accept()
-    
-    try:
-        while True:
-            # Keep connection alive and wait for backend logs
-            await asyncio.sleep(0.1)
-            
-            # This endpoint will be used to send executor logs from the backend
-            # The actual log streaming will be handled by the agent's execution process
-            
-    except WebSocketDisconnect:
-        logger.info("Executor WebSocket disconnected")
-    except Exception as e:
-        logger.error(f"Error in executor WebSocket: {e}")
-        try:
-            await websocket.send_text(json.dumps({
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }))
-        except:
-            pass
 
 @app.post("/api/configure")
 async def configure_agent(request: ConfigurationRequest):
@@ -340,20 +310,13 @@ async def get_system_info():
     """Get information about available tools, data lake, and software."""
     global agent
     
-    logger.info("System info endpoint called")
-    
     if agent is None:
-        logger.error("Agent is None - not initialized")
         raise HTTPException(status_code=500, detail="Agent not initialized")
     
     try:
-        logger.info(f"Agent path: {agent.path}")
-        logger.info(f"Agent module2api keys: {list(agent.module2api.keys())}")
-        
         # Get tools
         tools = []
         for module_name, module_tools in agent.module2api.items():
-            logger.info(f"Processing module: {module_name} with {len(module_tools)} tools")
             for tool in module_tools:
                 if tool.get("name") != "run_python_repl":  # Skip internal tool
                     tools.append(ToolInfo(
@@ -363,14 +326,10 @@ async def get_system_info():
                         parameters=tool.get("parameters", {})
                     ))
         
-        logger.info(f"Found {len(tools)} tools")
-        
         # Get data lake items
         data_lake_path = os.path.join(agent.path, "data_lake")
-        logger.info(f"Data lake path: {data_lake_path}")
         data_lake_items = []
         if os.path.exists(data_lake_path):
-            logger.info(f"Data lake directory exists, contents: {os.listdir(data_lake_path)}")
             for item in os.listdir(data_lake_path):
                 description = agent.data_lake_dict.get(item, f"Data lake item: {item}")
                 data_lake_items.append(DataLakeInfo(
@@ -378,21 +337,14 @@ async def get_system_info():
                     description=description,
                     path=os.path.join(data_lake_path, item)
                 ))
-        else:
-            logger.warning(f"Data lake directory does not exist: {data_lake_path}")
-        
-        logger.info(f"Found {len(data_lake_items)} data lake items")
         
         # Get software
         software = []
-        logger.info(f"Software library keys: {list(agent.library_content_dict.keys())}")
         for lib_name, lib_desc in agent.library_content_dict.items():
             software.append(SoftwareInfo(
                 name=lib_name,
                 description=lib_desc
             ))
-        
-        logger.info(f"Found {len(software)} software items")
         
         # Get current configuration
         config = {
@@ -404,21 +356,15 @@ async def get_system_info():
             "path": agent.path
         }
         
-        logger.info(f"Configuration: {config}")
-        
-        result = SystemInfo(
+        return SystemInfo(
             tools=tools,
             data_lake=data_lake_items,
             software=software,
             configuration=config
         )
         
-        logger.info(f"Returning system info with {len(tools)} tools, {len(data_lake_items)} data items, {len(software)} software items")
-        return result
-        
     except Exception as e:
         logger.error(f"Error getting system info: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/sessions")

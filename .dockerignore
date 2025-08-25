@@ -1,0 +1,64 @@
+# Generated images and data
+backend/generated_images/
+backend/data/
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Test files
+tests/
+test_*
+*_test.py
+
+# Temporary files
+*.tmp
+*.temp
+
+# Frontend (not needed for backend build)
+frontend/
+
+# Nginx config (not needed for backend build)
+nginx.conf
+
+# Docker files (not needed in container)
+docker-compose.yml
+Dockerfile*
+.dockerignore
+
+# Keep requirements files
+!requirements*.txt
+
+# Egg info
+biomni.egg-info/
+
+# Pre-commit config
+.pre-commit-config.yaml

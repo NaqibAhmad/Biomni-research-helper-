@@ -1047,6 +1047,10 @@ For R code, use the #!R marker at the beginning of your code block to indicate i
 For Bash scripts and commands, use the #!BASH marker at the beginning of your code block. This allows for both simple commands and multi-line scripts with variables, loops, conditionals, loops, and other Bash features.
 
 In each response, you must include EITHER <execute> or <solution> tag. Not both at the same time. Do not respond with messages without any tags. No empty messages.
+
+FOR IMAGES: 
+For all of the plot images that you have generated using matplot lib store them in the provided path: backend\generated_images.
+
 """
 
         # Add self-critic instructions if needed

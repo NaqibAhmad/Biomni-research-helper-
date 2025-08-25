@@ -1,11 +1,9 @@
-version: '3.8'
-
 services:
   # Backend API Server
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -17,7 +15,6 @@ services:
       # - OPENAI_API_KEY=your_openai_api_key
       # - ANTHROPIC_API_KEY=your_anthropic_api_key
     volumes:
-      - ./backend:/app
       - biomni_data:/app/biomni_data
     restart: unless-stopped
     healthcheck:
@@ -26,22 +23,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Frontend Development Server
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
-    restart: unless-stopped
 
   # Nginx Reverse Proxy (for production)
   nginx:
@@ -54,7 +35,6 @@ services:
       - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       - backend
-      - frontend
     restart: unless-stopped
     profiles:
       - production
