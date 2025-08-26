@@ -63,7 +63,8 @@ app.add_middleware(
         "https://biomni-frontend-9qo9.vercel.app",  # Keep the old one for backward compatibility
         "http://localhost:3000",  # For local development
         "http://localhost:5173",  # For Vite dev server
-        "*"  # Allow all origins for debugging (remove in production)
+        "https://biomni-frontend-wcbl.vercel.app"
+        "https://biomni-frontend.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
