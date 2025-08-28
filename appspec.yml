@@ -1,0 +1,18 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /opt/biomni
+hooks:
+  BeforeInstall:
+    - location: scripts/stop_container.sh
+      runas: root
+  AfterInstall:
+    - location: scripts/login_ecr.sh
+      runas: root
+  ApplicationStart:
+    - location: scripts/start_container.sh
+      runas: root
+  ValidateService:
+    - location: scripts/health_check.sh
+      runas: root

@@ -1,9 +1,11 @@
+version: "3.8"
+
 services:
   # Backend API Server
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -11,10 +13,13 @@ services:
       - BIOMNI_PORT=8000
       - BIOMNI_RELOAD=false
       - BIOMNI_LOG_LEVEL=info
-      # Add your API keys and other environment variables here
-      # - OPENAI_API_KEY=your_openai_api_key
-      # - ANTHROPIC_API_KEY=your_anthropic_api_key
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    env_file:
+      - .env
+
     volumes:
+      - ./backend:/app
       - biomni_data:/app/biomni_data
     restart: unless-stopped
     healthcheck:
