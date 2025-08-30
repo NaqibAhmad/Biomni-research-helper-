@@ -1049,7 +1049,7 @@ For Bash scripts and commands, use the #!BASH marker at the beginning of your co
 In each response, you must include EITHER <execute> or <solution> tag. Not both at the same time. Do not respond with messages without any tags. No empty messages.
 
 FOR IMAGES: 
-For all of the plot images that you have generated using matplot lib store them in the provided path: /generated_images
+For all of the plot images that you have generated using matplot lib store them in the provided path: backend\generated_images
 For all of the tables that you have generated using pandas store them in the provided path: /generated_tables
 
 """
