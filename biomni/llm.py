@@ -128,17 +128,17 @@ def get_llm(
             raise ImportError(  # noqa: B904
                 "langchain-anthropic package is required for Anthropic models. Install with: pip install langchain-anthropic"
             )
-        
+
         # Get API key from environment or passed parameter
         anthropic_api_key = api_key if api_key and api_key != "EMPTY" else os.getenv("ANTHROPIC_API_KEY")
-        
+
         if not anthropic_api_key:
             raise ValueError(
                 "ANTHROPIC_API_KEY environment variable is not set. "
                 "Please set it with your Anthropic API key: "
                 "export ANTHROPIC_API_KEY='your-api-key-here'"
             )
-        
+
         return ChatAnthropic(
             model=model,
             temperature=temperature,
@@ -232,3 +232,41 @@ def get_llm(
         raise ValueError(
             f"Invalid source: {source}. Valid options are 'OpenAI', 'AzureOpenAI', 'Anthropic', 'Gemini', 'Groq', 'Bedrock', or 'Ollama'"
         )
+
+
+async def get_async_llm(
+    model: str | None = None,
+    temperature: float | None = None,
+    stop_sequences: list[str] | None = None,
+    source: SourceType | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    config: Optional["BiomniConfig"] = None,
+) -> BaseChatModel:
+    """
+    Get an async-compatible language model instance based on the specified model name and source.
+    This function supports models from OpenAI, Azure OpenAI, Anthropic, Ollama, Gemini, Bedrock, and custom model serving.
+
+    Args:
+        model (str): The model name to use
+        temperature (float): Temperature setting for generation
+        stop_sequences (list): Sequences that will stop generation
+        source (str): Source provider: "OpenAI", "AzureOpenAI", "Anthropic", "Ollama", "Gemini", "Bedrock", or "Custom"
+                      If None, will attempt to auto-detect from model name
+        base_url (str): The base URL for custom model serving (e.g., "http://localhost:8000/v1"), default is None
+        api_key (str): The API key for the custom llm
+        config (BiomniConfig): Optional configuration object. If provided, unspecified parameters will use config values
+
+    Returns:
+        BaseChatModel: An async-compatible language model instance
+    """
+    llm = get_llm(
+        model=model,
+        temperature=temperature,
+        stop_sequences=stop_sequences,
+        source=source,
+        base_url=base_url,
+        api_key=api_key,
+        config=config,
+    )
+    return llm

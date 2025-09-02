@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from io import StringIO
 
@@ -30,6 +31,36 @@ def run_python_repl(command: str) -> str:
 
     command = command.strip("```").strip()
     return execute_in_repl(command)
+
+
+async def run_python_repl_async(command: str) -> str:
+    """Async version: Executes the provided Python command in a persistent environment and returns the output.
+    Variables defined in one execution will be available in subsequent executions.
+    """
+
+    def execute_in_repl(command: str) -> str:
+        """Helper function to execute the command in the persistent environment."""
+        old_stdout = sys.stdout
+        sys.stdout = mystdout = StringIO()
+
+        # Use the persistent namespace
+        global _persistent_namespace
+
+        try:
+            # Execute the command in the persistent namespace
+            exec(command, _persistent_namespace)
+            output = mystdout.getvalue()
+        except Exception as e:
+            output = f"Error: {str(e)}"
+        finally:
+            sys.stdout = old_stdout
+        return output
+
+    command = command.strip("```").strip()
+
+    # Run the execution in a thread pool to avoid blocking the event loop
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, execute_in_repl, command)
 
 
 def read_function_source_code(function_name: str) -> str:

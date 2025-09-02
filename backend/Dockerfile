@@ -19,17 +19,17 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy requirements from root directory
 COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt
 
 # Copy the backend code
-COPY backend/ .
+COPY backend/ ./
 
 # Copy the biomni package
-COPY biomni/ biomni/
+COPY biomni/ ./biomni/
 
 # Create logs directory
 RUN mkdir -p /app/logs

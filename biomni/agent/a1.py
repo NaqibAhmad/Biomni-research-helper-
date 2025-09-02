@@ -15,9 +15,9 @@ from langgraph.graph import END, START, StateGraph
 
 from biomni.config import default_config
 from biomni.env_desc import data_lake_dict, library_content_dict
-from biomni.llm import SourceType, get_llm
+from biomni.llm import SourceType, get_async_llm, get_llm
 from biomni.model.retriever import ToolRetriever
-from biomni.tool.support_tools import run_python_repl
+from biomni.tool.support_tools import run_python_repl, run_python_repl_async
 from biomni.tool.tool_registry import ToolRegistry
 from biomni.utils import (
     check_and_download_s3_files,
@@ -26,7 +26,9 @@ from biomni.utils import (
     pretty_print,
     read_module2api,
     run_bash_script,
+    run_bash_script_async,
     run_r_code,
+    run_r_code_async,
     run_with_timeout,
     textify_api_dict,
 )
@@ -1048,8 +1050,8 @@ For Bash scripts and commands, use the #!BASH marker at the beginning of your co
 
 In each response, you must include EITHER <execute> or <solution> tag. Not both at the same time. Do not respond with messages without any tags. No empty messages.
 
-FOR IMAGES: 
-For all of the plot images that you have generated using matplot lib store them in the provided path: backend\generated_images
+FOR IMAGES:
+For all of the plot images that you have generated using matplot lib store them in the provided path: backend/generated_images
 For all of the tables that you have generated using pandas store them in the provided path: /generated_tables
 
 """
@@ -1882,3 +1884,414 @@ Each library is listed with its description to help you understand its functiona
             wrapper.__signature__ = inspect.Signature(new_params, return_annotation=dict)
 
             return wrapper
+
+    # Async methods for the A1 class
+    async def async_init(self):
+        """Initialize the async LLM for the agent."""
+        # Get the model name from the sync LLM instance
+        model_name = None
+        if hasattr(self.llm, "model_name"):
+            model_name = self.llm.model_name
+        elif hasattr(self.llm, "model"):
+            model_name = self.llm.model
+        elif hasattr(self.llm, "_model_name"):
+            model_name = self.llm._model_name
+
+        self.async_llm = get_async_llm(
+            model_name,
+            stop_sequences=["</execute>", "</solution>"],
+            source=getattr(self, "_source", None),
+            base_url=getattr(self, "_base_url", None),
+            api_key=getattr(self, "_api_key", None),
+            config=default_config,
+        )
+
+    async def configure_async(self, self_critic=False, test_time_scale_round=0):
+        """Configure the agent with async workflow."""
+        # Store self_critic for later use
+        self.self_critic = self_critic
+
+        # Get data lake content
+        data_lake_path = self.path + "/data_lake"
+        data_lake_content = glob.glob(data_lake_path + "/*")
+        data_lake_items = [x.split("/")[-1] for x in data_lake_content]
+
+        # Store data_lake_dict as instance variable for use in retrieval
+        self.data_lake_dict = data_lake_dict
+        # Store library_content_dict directly without library_content
+        self.library_content_dict = library_content_dict
+
+        # Prepare tool descriptions
+        tool_desc = {i: [x for x in j if x["name"] != "run_python_repl"] for i, j in self.module2api.items()}
+
+        # Prepare data lake items with descriptions
+        data_lake_with_desc = []
+        for item in data_lake_items:
+            description = self.data_lake_dict.get(item, f"Data lake item: {item}")
+            data_lake_with_desc.append({"name": item, "description": description})
+
+        # Add custom data items if they exist
+        if hasattr(self, "_custom_data") and self._custom_data:
+            for name, info in self._custom_data.items():
+                data_lake_with_desc.append({"name": name, "description": info["description"]})
+
+        # Prepare library content list including custom software
+        library_content_list = list(self.library_content_dict.keys())
+        if hasattr(self, "_custom_software") and self._custom_software:
+            for name in self._custom_software:
+                if name not in library_content_list:  # Avoid duplicates
+                    library_content_list.append(name)
+
+        # Generate the system prompt for initial configuration (is_retrieval=False)
+        # Prepare custom resources for highlighting
+        custom_tools = []
+        if hasattr(self, "_custom_tools") and self._custom_tools:
+            for name, info in self._custom_tools.items():
+                custom_tools.append(
+                    {
+                        "name": name,
+                        "description": info["description"],
+                        "module": info["module"],
+                    }
+                )
+
+        custom_data = []
+        if hasattr(self, "_custom_data") and self._custom_data:
+            for name, info in self._custom_data.items():
+                custom_data.append({"name": name, "description": info["description"]})
+
+        custom_software = []
+        if hasattr(self, "_custom_software") and self._custom_software:
+            for name, info in self._custom_software.items():
+                custom_software.append({"name": name, "description": info["description"]})
+
+        self.system_prompt = self._generate_system_prompt(
+            tool_desc=tool_desc,
+            data_lake_content=data_lake_with_desc,
+            library_content_list=library_content_list,
+            self_critic=self_critic,
+            is_retrieval=False,
+            custom_tools=custom_tools if custom_tools else None,
+            custom_data=custom_data if custom_data else None,
+            custom_software=custom_software if custom_software else None,
+        )
+
+        # Define the async nodes
+        async def generate_async(state: AgentState) -> AgentState:
+            messages = [SystemMessage(content=self.system_prompt)] + state["messages"]
+            response = await self.async_llm.ainvoke(messages)
+
+            # Parse the response
+            msg = str(response.content)
+
+            # Check for incomplete tags and fix them
+            if "<execute>" in msg and "</execute>" not in msg:
+                msg += "</execute>"
+            if "<solution>" in msg and "</solution>" not in msg:
+                msg += "</solution>"
+            if "<think>" in msg and "</think>" not in msg:
+                msg += "</think>"
+
+            think_match = re.search(r"<think>(.*?)</think>", msg, re.DOTALL)
+            execute_match = re.search(r"<execute>(.*?)</execute>", msg, re.DOTALL)
+            answer_match = re.search(r"<solution>(.*?)</solution>", msg, re.DOTALL)
+
+            # Add the message to the state before checking for errors
+            state["messages"].append(AIMessage(content=msg.strip()))
+
+            if answer_match:
+                state["next_step"] = "end"
+            elif execute_match:
+                state["next_step"] = "execute"
+            elif think_match:
+                state["next_step"] = "generate"
+            else:
+                print("parsing error...")
+                # Check if we already added an error message to avoid infinite loops
+                error_count = sum(
+                    1 for m in state["messages"] if isinstance(m, AIMessage) and "There are no tags" in m.content
+                )
+
+                if error_count >= 2:
+                    # If we've already tried to correct the model twice, just end the conversation
+                    print("Detected repeated parsing errors, ending conversation")
+                    state["next_step"] = "end"
+                    # Add a final message explaining the termination
+                    state["messages"].append(
+                        AIMessage(
+                            content="Execution terminated due to repeated parsing errors. Please check your input and try again."
+                        )
+                    )
+                else:
+                    # Try to correct it
+                    state["messages"].append(
+                        HumanMessage(
+                            content="Each response must include thinking process followed by either <execute> or <solution> tag. But there are no tags in the current response. Please follow the instruction, fix and regenerate the response again."
+                        )
+                    )
+                    state["next_step"] = "generate"
+            return state
+
+        async def execute_async(state: AgentState) -> AgentState:
+            last_message = state["messages"][-1].content
+            # Only add the closing tag if it's not already there
+            if "<execute>" in last_message and "</execute>" not in last_message:
+                last_message += "</execute>"
+
+            execute_match = re.search(r"<execute>(.*?)</execute>", last_message, re.DOTALL)
+            if execute_match:
+                code = execute_match.group(1)
+
+                # Set timeout duration (10 minutes = 600 seconds)
+                # timeout = self.timeout_seconds  # Not used in async version
+
+                # Check if the code is R code
+                if (
+                    code.strip().startswith("#!R")
+                    or code.strip().startswith("# R code")
+                    or code.strip().startswith("# R script")
+                ):
+                    # Remove the R marker and run as R code
+                    r_code = re.sub(r"^#!R|^# R code|^# R script", "", code, 1).strip()  # noqa: B034
+                    result = await run_r_code_async(r_code)
+                # Check if the code is a Bash script or CLI command
+                elif (
+                    code.strip().startswith("#!BASH")
+                    or code.strip().startswith("# Bash script")
+                    or code.strip().startswith("#!CLI")
+                ):
+                    # Handle both Bash scripts and CLI commands with the same function
+                    if code.strip().startswith("#!CLI"):
+                        # For CLI commands, extract the command and run it as a simple bash script
+                        cli_command = re.sub(r"^#!CLI", "", code, 1).strip()  # noqa: B034
+                        # Remove any newlines to ensure it's a single command
+                        cli_command = cli_command.replace("\n", " ")
+                        result = await run_bash_script_async(cli_command)
+                    else:
+                        # For Bash scripts, remove the marker and run as a bash script
+                        bash_script = re.sub(r"^#!BASH|^# Bash script", "", code, 1).strip()  # noqa: B034
+                        result = await run_bash_script_async(bash_script)
+                # Otherwise, run as Python code
+                else:
+                    # Inject custom functions into the Python execution environment
+                    self._inject_custom_functions_to_repl()
+                    result = await run_python_repl_async(code)
+
+                if len(result) > 10000:
+                    result = (
+                        "The output is too long to be added to context. Here are the first 10K characters...\n"
+                        + result[:10000]
+                    )
+                observation = f"\n<observation>{result}</observation>"
+                state["messages"].append(AIMessage(content=observation.strip()))
+
+            return state
+
+        def routing_function(
+            state: AgentState,
+        ) -> Literal["execute", "generate", "end"]:
+            next_step = state.get("next_step")
+            if next_step == "execute":
+                return "execute"
+            elif next_step == "generate":
+                return "generate"
+            elif next_step == "end":
+                return "end"
+            else:
+                raise ValueError(f"Unexpected next_step: {next_step}")
+
+        def routing_function_self_critic(
+            state: AgentState,
+        ) -> Literal["generate", "end"]:
+            next_step = state.get("next_step")
+            if next_step == "generate":
+                return "generate"
+            elif next_step == "end":
+                return "end"
+            else:
+                raise ValueError(f"Unexpected next_step: {next_step}")
+
+        async def execute_self_critic_async(state: AgentState) -> AgentState:
+            if self.critic_count < test_time_scale_round:
+                # Generate feedback based on message history
+                messages = state["messages"]
+                feedback_prompt = f"""
+                Here is a reminder of what is the user requested: {self.user_task}
+                Examine the previous executions, reaosning, and solutions.
+                Critic harshly on what could be improved?
+                Be specific and constructive.
+                Think hard what are missing to solve the task.
+                No question asked, just feedbacks.
+                """
+                feedback = await self.async_llm.ainvoke(messages + [HumanMessage(content=feedback_prompt)])
+
+                # Add feedback as a new message
+                state["messages"].append(
+                    HumanMessage(
+                        content=f"Wait... this is not enough to solve the task. Here are some feedbacks for improvement:\n{feedback.content}"
+                    )
+                )
+                self.critic_count += 1
+                state["next_step"] = "generate"
+            else:
+                state["next_step"] = "end"
+
+            return state
+
+        # Create the async workflow
+        workflow = StateGraph(AgentState)
+
+        # Add nodes
+        workflow.add_node("generate", generate_async)
+        workflow.add_node("execute", execute_async)
+
+        if self_critic:
+            workflow.add_node("self_critic", execute_self_critic_async)
+            # Add conditional edges
+            workflow.add_conditional_edges(
+                "generate",
+                routing_function,
+                path_map={
+                    "execute": "execute",
+                    "generate": "generate",
+                    "end": "self_critic",
+                },
+            )
+            workflow.add_conditional_edges(
+                "self_critic",
+                routing_function_self_critic,
+                path_map={"generate": "generate", "end": END},
+            )
+        else:
+            # Add conditional edges
+            workflow.add_conditional_edges(
+                "generate",
+                routing_function,
+                path_map={"execute": "execute", "generate": "generate", "end": END},
+            )
+        workflow.add_edge("execute", "generate")
+        workflow.add_edge(START, "generate")
+
+        # Compile the async workflow
+        self.async_app = workflow.compile()
+        self.checkpointer = MemorySaver()
+        self.async_app.checkpointer = self.checkpointer
+
+    async def go_async(self, prompt):
+        """Execute the agent asynchronously with the given prompt."""
+        try:
+            self.critic_count = 0
+            self.user_task = prompt
+
+            if self.use_tool_retriever:
+                selected_resources_names = await self._prepare_resources_for_retrieval_async(prompt)
+                self.update_system_prompt_with_selected_resources(selected_resources_names)
+
+            inputs = {"messages": [HumanMessage(content=prompt)], "next_step": None}
+            config = {"recursion_limit": 500, "configurable": {"thread_id": 42}}
+            self.log = []
+
+            async for s in self.async_app.astream(inputs, stream_mode="values", config=config):
+                message = s["messages"][-1]
+                out = pretty_print(message)
+                self.log.append(out)
+
+            return self.log, message.content
+        except Exception as e:
+            error_msg = f"Error in async execution: {str(e)}"
+            self.log.append(error_msg) if hasattr(self, "log") else None
+            return getattr(self, "log", [error_msg]), error_msg
+
+    async def go_stream_async(self, prompt):
+        """Execute the agent asynchronously with streaming output."""
+        try:
+            self.critic_count = 0
+            self.user_task = prompt
+
+            if self.use_tool_retriever:
+                selected_resources_names = await self._prepare_resources_for_retrieval_async(prompt)
+                self.update_system_prompt_with_selected_resources(selected_resources_names)
+
+            inputs = {"messages": [HumanMessage(content=prompt)], "next_step": None}
+            config = {"recursion_limit": 500, "configurable": {"thread_id": 42}}
+            self.log = []
+
+            async for s in self.async_app.astream(inputs, stream_mode="values", config=config):
+                message = s["messages"][-1]
+                out = pretty_print(message)
+                self.log.append(out)
+
+                # Yield the current step
+                yield {"output": out}
+        except Exception as e:
+            error_msg = f"Error in async streaming: {str(e)}"
+            self.log.append(error_msg) if hasattr(self, "log") else None
+            yield {"output": error_msg}
+
+    async def _prepare_resources_for_retrieval_async(self, prompt):
+        """Prepare resources for retrieval asynchronously and return selected resource names."""
+        if not self.use_tool_retriever:
+            return None
+
+        # Gather all available resources
+        # 1. Tools from the registry
+        all_tools = self.tool_registry.tools if hasattr(self, "tool_registry") else []
+
+        # 2. Data lake items with descriptions
+        data_lake_path = self.path + "/data_lake"
+        data_lake_content = glob.glob(data_lake_path + "/*")
+        data_lake_items = [x.split("/")[-1] for x in data_lake_content]
+
+        # Create data lake descriptions for retrieval
+        data_lake_descriptions = []
+        for item in data_lake_items:
+            description = self.data_lake_dict.get(item, f"Data lake item: {item}")
+            data_lake_descriptions.append({"name": item, "description": description})
+
+        # Add custom data items to retrieval if they exist
+        if hasattr(self, "_custom_data") and self._custom_data:
+            for name, info in self._custom_data.items():
+                data_lake_descriptions.append({"name": name, "description": info["description"]})
+
+        # 3. Libraries with descriptions - use library_content_dict directly
+        library_descriptions = []
+        for lib_name, lib_desc in self.library_content_dict.items():
+            library_descriptions.append({"name": lib_name, "description": lib_desc})
+
+        # Add custom software items to retrieval if they exist
+        if hasattr(self, "_custom_software") and self._custom_software:
+            for name, info in self._custom_software.items():
+                # Check if it's not already in the library descriptions to avoid duplicates
+                if not any(lib["name"] == name for lib in library_descriptions):
+                    library_descriptions.append({"name": name, "description": info["description"]})
+
+        # Use retrieval to get relevant resources
+        resources = {
+            "tools": all_tools,
+            "data_lake": data_lake_descriptions,
+            "libraries": library_descriptions,
+        }
+
+        # Use prompt-based retrieval with the agent's async LLM
+        selected_resources = self.retriever.prompt_based_retrieval(prompt, resources, llm=self.async_llm)
+        print("Using prompt-based retrieval with the agent's async LLM")
+
+        # Extract the names from the selected resources for the system prompt
+        selected_resources_names = {
+            "tools": selected_resources["tools"],
+            "data_lake": [],
+            "libraries": [lib["name"] if isinstance(lib, dict) else lib for lib in selected_resources["libraries"]],
+        }
+
+        # Process data lake items to extract just the names
+        for item in selected_resources["data_lake"]:
+            if isinstance(item, dict):
+                selected_resources_names["data_lake"].append(item["name"])
+            elif isinstance(item, str) and ": " in item:
+                # If the item already has a description, extract just the name
+                name = item.split(": ")[0]
+                selected_resources_names["data_lake"].append(name)
+            else:
+                selected_resources_names["data_lake"].append(item)
+
+        return selected_resources_names

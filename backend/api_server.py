@@ -10,21 +10,21 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import sys
 import traceback
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from biomni.config import BiomniConfig
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from pydantic.json import pydantic_encoder
-from biomni.config import BiomniConfig
 
 config = BiomniConfig()
 
@@ -165,12 +165,41 @@ def initialize_agent(config: Optional[ConfigurationRequest] = None) -> A1:
     return agent
 
 
+async def initialize_async_agent(config: Optional[ConfigurationRequest] = None) -> A1:
+    """Initialize the async Biomni agent with the given configuration."""
+    global agent
+
+    if agent is not None:
+        logger.info("Agent already initialized, reinitializing with new config")
+
+    # Use provided config or defaults
+    if config:
+        agent = A1(
+            llm=config.llm,
+            source=config.source,
+            use_tool_retriever=config.use_tool_retriever,
+            timeout_seconds=config.timeout_seconds,
+            base_url=config.base_url,
+            api_key=config.api_key,
+        )
+    else:
+        agent = A1()
+
+    await agent.async_init()
+    await agent.configure_async()
+    logger.info("Async Biomni agent initialized successfully")
+    return agent
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the agent on startup."""
     global agent
     try:
-        agent = initialize_agent(config=config)
+        # Initialize the agent with async capabilities
+        agent = initialize_agent()
+        await agent.async_init()
+        await agent.configure_async()
         logger.info("Biomni API server started successfully")
     except Exception as e:
         logger.error(f"Failed to initialize agent: {e}")
@@ -186,7 +215,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "agent_initialized": agent is not None, "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy",
+        "agent_initialized": agent is not None,
+        "async_agent_initialized": agent is not None and hasattr(agent, "async_llm"),
+        "timestamp": datetime.now().isoformat(),
+    }
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -224,13 +258,48 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/chat/async", response_model=ChatResponse)
+async def chat_async(request: ChatRequest):
+    """Send a message to the async agent and get a response."""
+    global agent
+
+    if agent is None or not hasattr(agent, "async_llm"):
+        raise HTTPException(status_code=500, detail="Async agent not initialized")
+
+    try:
+        # Generate session ID if not provided
+        session_id = request.session_id or str(uuid4())
+
+        # Update agent configuration if needed
+        if request.use_tool_retriever is not None:
+            agent.use_tool_retriever = request.use_tool_retriever
+
+        # Store session info
+        if session_id not in active_sessions:
+            active_sessions[session_id] = {"created_at": datetime.now(), "message_count": 0}
+
+        active_sessions[session_id]["message_count"] += 1
+
+        # Execute the async agent
+        log, response = await agent.go_async(request.message)
+
+        return ChatResponse(
+            session_id=session_id, response=response, log=log, timestamp=datetime.now(), status="success"
+        )
+
+    except Exception as e:
+        logger.error(f"Error in async chat endpoint: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.websocket("/api/chat/stream/{session_id}")
 async def chat_stream(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for streaming chat responses."""
     global agent
 
-    if agent is None:
-        await websocket.close(code=1008, reason="Agent not initialized")
+    if agent is None or not hasattr(agent, "async_llm"):
+        await websocket.close(code=1008, reason="Async agent not initialized")
         return
 
     await websocket.accept()
@@ -250,9 +319,9 @@ async def chat_stream(websocket: WebSocket, session_id: str):
             if use_tool_retriever is not None:
                 agent.use_tool_retriever = use_tool_retriever
 
-            # Stream the response
+            # Stream the response using async generator
             step_count = 0
-            for step in agent.go_stream(message):
+            async for step in agent.go_stream_async(message):
                 step_count += 1
                 response_data = StreamResponse(
                     session_id=session_id,
@@ -289,7 +358,10 @@ async def configure_agent(request: ConfigurationRequest):
     global agent
 
     try:
+        # Configure the agent with async capabilities
         agent = initialize_agent(request)
+        await agent.async_init()
+        await agent.configure_async()
         return {"message": "Agent configured successfully", "timestamp": datetime.now().isoformat()}
     except Exception as e:
         logger.error(f"Error configuring agent: {e}")

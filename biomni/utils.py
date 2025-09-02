@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import enum
 import importlib
 import json
@@ -51,6 +52,43 @@ def run_r_code(code: str) -> str:
             return result.stdout
     except Exception as e:
         return f"Error running R code: {str(e)}"
+
+
+async def run_r_code_async(code: str) -> str:
+    """Async version: Run R code using subprocess.
+
+    Args:
+        code: R code to run
+
+    Returns:
+        Output of the R code
+
+    """
+
+    def _run_r_code():
+        try:
+            # Create a temporary file to store the R code
+            with tempfile.NamedTemporaryFile(suffix=".R", mode="w", delete=False) as f:
+                f.write(code)
+                temp_file = f.name
+
+            # Run the R code using Rscript
+            result = subprocess.run(["Rscript", temp_file], capture_output=True, text=True, check=False)
+
+            # Clean up the temporary file
+            os.unlink(temp_file)
+
+            # Return the output
+            if result.returncode != 0:
+                return f"Error running R code:\n{result.stderr}"
+            else:
+                return result.stdout
+        except Exception as e:
+            return f"Error running R code: {str(e)}"
+
+    # Run in thread pool to avoid blocking
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run_r_code)
 
 
 def run_bash_script(script: str) -> str:
@@ -144,16 +182,64 @@ def run_bash_script(script: str) -> str:
         return f"Error running Bash script: {str(e)}"
 
 
+async def run_bash_script_async(script: str) -> str:
+    """Async version: Run a Bash script using subprocess.
+    Args:
+        script: Bash script to run
+
+    Returns:
+        Output of the Bash script
+    """
+
+    def _run_bash_script():
+        try:
+            # Trim any leading/trailing whitespace
+            script_content = script.strip()
+
+            # If the script is empty, return an error
+            if not script_content:
+                return "Error: Empty script"
+
+            # Create a temporary file to store the Bash script
+            with tempfile.NamedTemporaryFile(suffix=".sh", mode="w", delete=False) as f:
+                # Add shebang if not present
+                if not script_content.startswith("#!/"):
+                    f.write("#!/bin/bash\n")
+                f.write(script_content)
+                temp_file = f.name
+
+            # Make the script executable
+            os.chmod(temp_file, 0o755)
+
+            # Run the Bash script
+            result = subprocess.run([temp_file], capture_output=True, text=True, check=False)
+
+            # Clean up the temporary file
+            os.unlink(temp_file)
+
+            # Return the output
+            if result.returncode != 0:
+                traceback.print_stack()
+                print(result)
+                return f"Error running Bash script (exit code {result.returncode}):\n{result.stderr}"
+            else:
+                return result.stdout
+        except Exception as e:
+            traceback.print_exc()
+            return f"Error running Bash script: {str(e)}"
+
+    # Run in thread pool to avoid blocking
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run_bash_script)
+
+
 # Keep the run_cli_command for backward compatibility
 def run_cli_command(command: str) -> str:
     """Run a CLI command using subprocess.
-
     Args:
         command: CLI command to run
-
     Returns:
         Output of the CLI command
-
     """
     try:
         # Trim any leading/trailing whitespace
