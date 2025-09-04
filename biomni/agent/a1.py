@@ -1897,7 +1897,7 @@ Each library is listed with its description to help you understand its functiona
         elif hasattr(self.llm, "_model_name"):
             model_name = self.llm._model_name
 
-        self.async_llm = get_async_llm(
+        self.async_llm = await get_async_llm(
             model_name,
             stop_sequences=["</execute>", "</solution>"],
             source=getattr(self, "_source", None),
@@ -2272,9 +2272,9 @@ Each library is listed with its description to help you understand its functiona
             "libraries": library_descriptions,
         }
 
-        # Use prompt-based retrieval with the agent's async LLM
-        selected_resources = self.retriever.prompt_based_retrieval(prompt, resources, llm=self.async_llm)
-        print("Using prompt-based retrieval with the agent's async LLM")
+        # Use prompt-based retrieval with the agent's sync LLM
+        selected_resources = self.retriever.prompt_based_retrieval(prompt, resources, llm=self.llm)
+        print("Using prompt-based retrieval with the agent's sync LLM")
 
         # Extract the names from the selected resources for the system prompt
         selected_resources_names = {
