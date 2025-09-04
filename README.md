@@ -20,15 +20,11 @@
 </a>
 </p>
 
-
-
 # Biomni: A General-Purpose Biomedical AI Agent
 
 ## Overview
 
-
 Biomni is a general-purpose biomedical AI agent designed to autonomously execute a wide range of research tasks across diverse biomedical subfields. By integrating cutting-edge large language model (LLM) reasoning with retrieval-augmented planning and code-based execution, Biomni helps scientists dramatically enhance research productivity and generate testable hypotheses.
-
 
 ## Quick Start
 
@@ -125,8 +121,8 @@ export LLM_SOURCE="Groq" # Optional: set this to use models served by Groq
 
 
 ```
-</details>
 
+</details>
 
 #### ⚠️ Known Package Conflicts
 
@@ -147,6 +143,7 @@ agent.go("Plan a CRISPR screen to identify genes that regulate T cell exhaustion
 agent.go("Perform scRNA-seq annotation at [PATH] and generate meaningful hypothesis")
 agent.go("Predict ADMET properties for this compound: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O")
 ```
+
 If you plan on using Azure for your model, always prefix the model name with azure- (e.g. llm='azure-gpt-4o').
 
 ### Configuration Management
@@ -184,7 +181,6 @@ agent.go("Find FDA active ingredient information for ibuprofen")
 **Built-in MCP Servers:**
 For usage and implementation details, see the [MCP Integration Documentation](docs/mcp_integration.md) and examples in [`tutorials/examples/add_mcp_server/`](tutorials/examples/add_mcp_server/) and [`tutorials/examples/expose_biomni_server/`](tutorials/examples/expose_biomni_server/).
 
-
 ## 🤝 Contributing to Biomni
 
 Biomni is an open-science initiative that thrives on community contributions. We welcome:
@@ -216,7 +212,6 @@ We believe that by collaboratively defining and curating a shared library of sta
 
 Let’s build it together.
 
-
 ## Tutorials and Examples
 
 **[Biomni 101](./tutorials/biomni_101.ipynb)** - Basic concepts and first steps
@@ -238,6 +233,7 @@ Experience Biomni through our no-code web interface at **[biomni.stanford.edu](h
 - [x] Biomni A1+E1 release
 
 ## Important Note
+
 - Security warning: Currently, Biomni executes LLM-generated code with full system privileges. If you want to use it in production, please use in isolated/sandboxed environments. The agent can access files, network, and system commands. Be careful with sensitive data or credentials.
 - This release was frozen as of April 15 2025, so it differs from the current web platform.
 - Biomni itself is Apache 2.0-licensed, but certain integrated tools, databases, or software may carry more restrictive commercial licenses. Review each component carefully before any commercial use.

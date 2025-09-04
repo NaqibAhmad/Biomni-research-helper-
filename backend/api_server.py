@@ -225,42 +225,7 @@ async def health_check():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Send a message to the agent and get a response."""
-    global agent
-
-    if agent is None:
-        raise HTTPException(status_code=500, detail="Agent not initialized")
-
-    try:
-        # Generate session ID if not provided
-        session_id = request.session_id or str(uuid4())
-
-        # Update agent configuration if needed
-        if request.use_tool_retriever is not None:
-            agent.use_tool_retriever = request.use_tool_retriever
-
-        # Store session info
-        if session_id not in active_sessions:
-            active_sessions[session_id] = {"created_at": datetime.now(), "message_count": 0}
-
-        active_sessions[session_id]["message_count"] += 1
-
-        # Execute the agent
-        log, response = agent.go(request.message)
-
-        return ChatResponse(
-            session_id=session_id, response=response, log=log, timestamp=datetime.now(), status="success"
-        )
-
-    except Exception as e:
-        logger.error(f"Error in chat endpoint: {e}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/chat/async", response_model=ChatResponse)
-async def chat_async(request: ChatRequest):
-    """Send a message to the async agent and get a response."""
+    """Send a message to the agent and get a response using async processing."""
     global agent
 
     if agent is None or not hasattr(agent, "async_llm"):
@@ -280,7 +245,7 @@ async def chat_async(request: ChatRequest):
 
         active_sessions[session_id]["message_count"] += 1
 
-        # Execute the async agent
+        # Execute the agent asynchronously
         log, response = await agent.go_async(request.message)
 
         return ChatResponse(
@@ -288,7 +253,7 @@ async def chat_async(request: ChatRequest):
         )
 
     except Exception as e:
-        logger.error(f"Error in async chat endpoint: {e}")
+        logger.error(f"Error in chat endpoint: {e}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
