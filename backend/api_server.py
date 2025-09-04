@@ -286,7 +286,7 @@ async def chat_stream(websocket: WebSocket, session_id: str):
 
             # Stream the response using async generator
             step_count = 0
-            async for step in agent.go_stream_async(message):
+            async for step in await agent.go_stream_async(message):
                 step_count += 1
                 response_data = StreamResponse(
                     session_id=session_id,
