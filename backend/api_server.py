@@ -268,53 +268,92 @@ async def chat_stream(websocket: WebSocket, session_id: str):
         return
 
     await websocket.accept()
+    logger.info(f"WebSocket connected for session {session_id}")
 
     try:
         while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
-            message = message_data.get("message", "")
+            try:
+                # Receive message from client with timeout to prevent hanging
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+                message_data = json.loads(data)
+                message = message_data.get("message", "")
 
-            if not message:
+                if not message:
+                    continue
+
+                # Update agent configuration if provided
+                use_tool_retriever = message_data.get("use_tool_retriever", True)
+                if use_tool_retriever is not None:
+                    agent.use_tool_retriever = use_tool_retriever
+
+                # Stream the response using async generator with better error handling
+                step_count = 0
+                try:
+                    async for step in agent.go_stream_async(message):
+                        try:
+                            step_count += 1
+                            response_data = StreamResponse(
+                                session_id=session_id,
+                                output=step.get("output", ""),
+                                step=step_count,
+                                timestamp=datetime.now(),
+                                is_complete=False,
+                            )
+
+                            # Send with timeout to prevent blocking
+                            await asyncio.wait_for(websocket.send_text(response_data.json()), timeout=10.0)
+
+                            # Small delay to prevent overwhelming the client
+                            await asyncio.sleep(0.01)
+                        except TimeoutError:
+                            logger.warning(f"Send timeout for session {session_id}")
+                            break
+                        except Exception as send_error:
+                            logger.error(f"Error sending step {step_count}: {send_error}")
+                            break
+
+                    # Send completion signal
+                    try:
+                        completion_data = StreamResponse(
+                            session_id=session_id,
+                            output="",
+                            step=step_count + 1,
+                            timestamp=datetime.now(),
+                            is_complete=True,
+                        )
+                        await asyncio.wait_for(websocket.send_text(completion_data.json()), timeout=10.0)
+                    except Exception as completion_error:
+                        logger.error(f"Error sending completion: {completion_error}")
+
+                except Exception as stream_error:
+                    logger.error(f"Error in agent streaming: {stream_error}")
+                    # Send error message to client
+                    try:
+                        error_response = StreamResponse(
+                            session_id=session_id,
+                            output=f"Error: {str(stream_error)}",
+                            step=step_count + 1,
+                            timestamp=datetime.now(),
+                            is_complete=True,
+                        )
+                        await websocket.send_text(error_response.json())
+                    except Exception:
+                        pass
+
+            except TimeoutError:
+                # Timeout waiting for message - this is normal, continue the loop
                 continue
-
-            # Update agent configuration if provided
-            use_tool_retriever = message_data.get("use_tool_retriever", True)
-            if use_tool_retriever is not None:
-                agent.use_tool_retriever = use_tool_retriever
-
-            # Stream the response using async generator
-            step_count = 0
-            async for step in agent.go_stream_async(message):
-                step_count += 1
-                response_data = StreamResponse(
-                    session_id=session_id,
-                    output=step["output"],
-                    step=step_count,
-                    timestamp=datetime.now(),
-                    is_complete=False,
-                )
-
-                await websocket.send_text(response_data.json())
-
-            # Send completion signal
-            completion_data = StreamResponse(
-                session_id=session_id, output="", step=step_count + 1, timestamp=datetime.now(), is_complete=True
-            )
-
-            await websocket.send_text(completion_data.json())
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON received for session {session_id}")
+                continue
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")
     except Exception as e:
-        logger.error(f"Error in WebSocket stream: {e}")
-        try:
-            await websocket.send_text(
-                json.dumps({"error": str(e), "session_id": session_id, "timestamp": datetime.now().isoformat()})
-            )
-        except:
-            pass
+        logger.error(f"Unexpected error in WebSocket stream: {e}")
+        logger.error(traceback.format_exc())
+    finally:
+        logger.info(f"WebSocket cleanup completed for session {session_id}")
 
 
 @app.post("/api/configure")

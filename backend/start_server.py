@@ -45,11 +45,20 @@ def main():
         logger.info(f"Reload mode: {reload}")
         logger.info(f"Log level: {log_level}")
 
-        # Start the server
+        # Start the server with minimal WebSocket optimizations
         # For production with ~10 users, single worker is sufficient
-        # For higher load (100+ users), uncomment the optimized version below
-        uvicorn.run("api_server:app", host=host, port=port, reload=reload, log_level=log_level, access_log=True)
 
+        uvicorn.run(
+            "api_server:app",
+            host=host,
+            port=port,
+            reload=reload,
+            log_level=log_level,
+            access_log=True,
+            timeout_keep_alive=120,  # Keep connections alive for 2 minutes
+        )
+
+        # For higher load (100+ users), uncomment the optimized version below
         # OPTIMIZED VERSION (uncomment for high-traffic production):
         # uvicorn.run(
         #     "api_server:app",

@@ -1,7 +1,10 @@
+import asyncio
 import glob
 import inspect
+import logging
 import os
 import re
+import traceback
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any, Literal, Optional, TypedDict
@@ -36,6 +39,8 @@ from biomni.utils import (
 if os.path.exists(".env"):
     load_dotenv(".env", override=False)
     print("Loaded environment variables from .env")
+
+logger = logging.getLogger(__name__)
 
 
 class AgentState(TypedDict):
@@ -1906,6 +1911,50 @@ Each library is listed with its description to help you understand its functiona
             config=default_config,
         )
 
+        # Setup async-compatible tools for WebSocket streaming
+        self.async_tools = self._add_async_timeout_to_tools(self.tools)
+
+    def _add_async_timeout_to_tools(self, tools):
+        """Apply async timeout wrapper to all tool functions for WebSocket compatibility."""
+        import asyncio
+        from functools import wraps
+
+        def create_async_timed_func(original_func, timeout):
+            """Factory function that creates an async-safe timed function for each tool."""
+            tool_name = getattr(original_func, "__name__", "unknown")
+
+            @wraps(original_func)
+            async def async_timed_func(*args, **kwargs):
+                try:
+                    # Run the tool function in a thread pool to avoid blocking the event loop
+                    loop = asyncio.get_event_loop()
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: original_func(*args, **kwargs)), timeout=timeout
+                    )
+                    return result
+                except asyncio.TimeoutError:
+                    error_msg = f"ERROR: Tool {tool_name} execution timed out after {timeout} seconds. Please try with simpler inputs or break your task into smaller steps."
+                    print(f"ASYNC TIMEOUT: {error_msg}")
+                    return error_msg
+                except Exception as e:
+                    error_msg = f"Error in tool execution: {str(e)}"
+                    print(f"ASYNC ERROR in {tool_name}: {error_msg}")
+                    return error_msg
+
+            return async_timed_func
+
+        wrapped_tools = []
+        for tool in tools:
+            # Create async version of the tool function
+            async_func = create_async_timed_func(tool.func, self.timeout_seconds)
+
+            # Create a copy of the tool with the async-wrapped function
+            wrapped_tool = tool
+            wrapped_tool.func = async_func
+            wrapped_tools.append(wrapped_tool)
+
+        return wrapped_tools
+
     async def configure_async(self, self_critic=False, test_time_scale_round=0):
         """Configure the agent with async workflow."""
         # Store self_critic for later use
@@ -2209,23 +2258,68 @@ Each library is listed with its description to help you understand its functiona
             self.user_task = prompt
 
             if self.use_tool_retriever:
-                selected_resources_names = await self._prepare_resources_for_retrieval_async(prompt)
-                self.update_system_prompt_with_selected_resources(selected_resources_names)
+                try:
+                    selected_resources_names = await self._prepare_resources_for_retrieval_async(prompt)
+                    self.update_system_prompt_with_selected_resources(selected_resources_names)
+                except Exception as retrieval_error:
+                    logger.error(f"Error in resource retrieval: {retrieval_error}")
+                    yield {"output": f"Warning: Resource retrieval failed, continuing with default tools"}
 
             inputs = {"messages": [HumanMessage(content=prompt)], "next_step": None}
-            config = {"recursion_limit": 500, "configurable": {"thread_id": 42}}
+            config = {"recursion_limit": 100, "configurable": {"thread_id": 42}}  # Reduced recursion limit
             self.log = []
 
-            async for s in self.async_app.astream(inputs, stream_mode="values", config=config):
-                message = s["messages"][-1]
-                out = pretty_print(message)
-                self.log.append(out)
+            step_count = 0
+            last_output_time = asyncio.get_event_loop().time()
 
-                # Yield the current step
-                yield {"output": out}
+            try:
+                async for s in self.async_app.astream(inputs, stream_mode="values", config=config):
+                    try:
+                        current_time = asyncio.get_event_loop().time()
+
+                        # Check for timeout between steps (5 minutes max)
+                        if current_time - last_output_time > 300:
+                            logger.warning("Stream timeout: No output for 5 minutes")
+                            yield {"output": "Warning: Operation timed out. Stopping execution."}
+                            break
+
+                        if "messages" in s and s["messages"]:
+                            message = s["messages"][-1]
+                            out = pretty_print(message)
+                            self.log.append(out)
+
+                            step_count += 1
+                            last_output_time = current_time
+
+                            # Yield the current step
+                            yield {"output": out}
+
+                            # Add a small delay to prevent overwhelming the WebSocket
+                            await asyncio.sleep(0.1)
+
+                            # Check for too many steps (safety mechanism)
+                            if step_count > 50:
+                                logger.warning("Too many steps, stopping execution")
+                                yield {"output": "Warning: Maximum steps reached. Stopping execution."}
+                                break
+
+                    except Exception as step_error:
+                        logger.error(f"Error processing step {step_count}: {step_error}")
+                        yield {"output": f"Error in step {step_count}: {str(step_error)}"}
+
+            except asyncio.CancelledError:
+                logger.info("Stream was cancelled")
+                yield {"output": "Operation was cancelled."}
+            except Exception as stream_error:
+                logger.error(f"Error in async stream loop: {stream_error}")
+                yield {"output": f"Stream error: {str(stream_error)}"}
+
         except Exception as e:
             error_msg = f"Error in async streaming: {str(e)}"
-            self.log.append(error_msg) if hasattr(self, "log") else None
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            if hasattr(self, "log"):
+                self.log.append(error_msg)
             yield {"output": error_msg}
 
     async def _prepare_resources_for_retrieval_async(self, prompt):

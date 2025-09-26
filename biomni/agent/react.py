@@ -1,3 +1,4 @@
+import asyncio
 import glob
 import inspect
 import json
@@ -147,6 +148,45 @@ class react:
         for tool in tools:
             wrapped_tool = tool
             wrapped_tool.func = create_timed_func(tool.func, self.timeout_seconds)
+            wrapped_tools.append(wrapped_tool)
+
+        return wrapped_tools
+
+    def _add_async_timeout_to_tools(self, tools):
+        """Apply async timeout wrapper to all tool functions for WebSocket compatibility."""
+
+        def create_async_timed_func(original_func, timeout):
+            """Factory function that creates an async-safe timed function for each tool."""
+            tool_name = getattr(original_func, "__name__", "unknown")
+
+            @wraps(original_func)
+            async def async_timed_func(*args, **kwargs):
+                try:
+                    # Run the tool function in a thread pool to avoid blocking the event loop
+                    loop = asyncio.get_event_loop()
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: original_func(*args, **kwargs)), timeout=timeout
+                    )
+                    return result
+                except asyncio.TimeoutError:
+                    error_msg = f"ERROR: Tool {tool_name} execution timed out after {timeout} seconds. Please try with simpler inputs or break your task into smaller steps."
+                    print(f"ASYNC TIMEOUT: {error_msg}")
+                    return error_msg
+                except Exception as e:
+                    error_msg = f"Error in tool execution: {str(e)}"
+                    print(f"ASYNC ERROR in {tool_name}: {error_msg}")
+                    return error_msg
+
+            return async_timed_func
+
+        wrapped_tools = []
+        for tool in tools:
+            # Create async version of the tool function
+            async_func = create_async_timed_func(tool.func, self.timeout_seconds)
+
+            # Create a copy of the tool with the async-wrapped function
+            wrapped_tool = tool
+            wrapped_tool.func = async_func
             wrapped_tools.append(wrapped_tool)
 
         return wrapped_tools
