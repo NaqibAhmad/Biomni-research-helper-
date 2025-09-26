@@ -171,6 +171,15 @@ class A1:
         self.module2api = module2api
         self.use_tool_retriever = use_tool_retriever
 
+        # Create tools from module2api (similar to react class)
+        from biomni.utils import api_schema_to_langchain_tool
+
+        tools = []
+        for module, api_list in module2api.items():
+            print("Registering tools from module:", module)
+            tools += [api_schema_to_langchain_tool(api, mode="custom_tool", module_name=module) for api in api_list]
+        self.tools = tools
+
         if self.use_tool_retriever:
             self.tool_registry = ToolRegistry(module2api)
             self.retriever = ToolRetriever()
