@@ -1,30 +1,17 @@
-<p align="center">
-  <img src="./figs/biomni_logo.png" alt="Biomni Logo" width="600px" />
-</p>
-
-<p align="center">
-<a href="https://join.slack.com/t/biomnigroup/shared_invite/zt-38dat07mc-mmDIYzyCrNtV4atULTHRiw">
-<img src="https://img.shields.io/badge/Join-Slack-4A154B?style=for-the-badge&logo=slack" alt="Join Slack" />
-</a>
-<a href="https://biomni.stanford.edu">
-<img src="https://img.shields.io/badge/Try-Web%20UI-blue?style=for-the-badge" alt="Web UI" />
-</a>
-<a href="https://x.com/ProjectBiomni">
-<img src="https://img.shields.io/badge/Follow-on%20X-black?style=for-the-badge&logo=x" alt="Follow on X" />
-</a>
-<a href="https://www.linkedin.com/company/project-biomni">
-<img src="https://img.shields.io/badge/Follow-LinkedIn-0077B5?style=for-the-badge&logo=linkedin" alt="Follow on LinkedIn" />
-</a>
-<a href="https://www.biorxiv.org/content/10.1101/2025.05.30.656746v1">
-<img src="https://img.shields.io/badge/Read-Paper-green?style=for-the-badge" alt="Paper" />
-</a>
-</p>
-
-# Biomni: A General-Purpose Biomedical AI Agent
+# MyBioAI: A General-Purpose Biomedical AI Agent
 
 ## Overview
 
-Biomni is a general-purpose biomedical AI agent designed to autonomously execute a wide range of research tasks across diverse biomedical subfields. By integrating cutting-edge large language model (LLM) reasoning with retrieval-augmented planning and code-based execution, Biomni helps scientists dramatically enhance research productivity and generate testable hypotheses.
+MyBioAI is a general-purpose biomedical AI agent designed to autonomously execute a wide range of research tasks across diverse biomedical subfields. By integrating cutting-edge large language model (LLM) reasoning with retrieval-augmented planning and code-based execution, MyBioAI helps scientists dramatically enhance research productivity and generate testable hypotheses.
+
+### Key Features
+
+- **Multi-Agent Architecture** - A1 and A2 agents for complex biomedical reasoning
+- **Multiple LLM Support** - Claude Sonnet 4 (default), GPT-5, and more
+- **Dynamic Model Selection** - Switch between models at runtime via API
+- **Prompt Library** - Save and reuse custom prompts (see [PROMPT_LIBRARY_README.md](./PROMPT_LIBRARY_README.md))
+- **Comprehensive Toolset** - Genomics, proteomics, drug discovery, and more
+- **RAG-Enhanced** - Tool retrieval for intelligent task execution
 
 ## Quick Start
 
@@ -70,10 +57,10 @@ cp .env.example .env
 Your `.env` file should look like:
 
 ```env
-# Required: Anthropic API Key for Claude models
+# Anthropic API Key for Claude models
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
-# Optional: OpenAI API Key (if using OpenAI models)
+# OpenAI API Key (for GPT-5, GPT-4, etc.)
 OPENAI_API_KEY=your_openai_api_key_here
 
 # Optional: Azure OpenAI API Key (if using Azure OpenAI models)
@@ -110,8 +97,8 @@ AWS_REGION=us-east-1
 Alternatively, configure your API keys in bash profile `~/.bashrc`:
 
 ```bash
-export ANTHROPIC_API_KEY="YOUR_API_KEY"
-export OPENAI_API_KEY="YOUR_API_KEY" # optional if you just use Claude
+export ANTHROPIC_API_KEY="YOUR_API_KEY"  # For Claude models
+export OPENAI_API_KEY="YOUR_API_KEY"  # For GPT-5, GPT-4, GPT-3.5 models
 export OPENAI_ENDPOINT="https://your-resource-name.openai.azure.com/" # optional unless you are using Azure
 export AWS_BEARER_TOKEN_BEDROCK="YOUR_BEDROCK_API_KEY" # optional for AWS Bedrock models
 export AWS_REGION="us-east-1" # optional, defaults to us-east-1 for Bedrock
@@ -130,13 +117,17 @@ Some Python packages are not installed by default in the Biomni environment due 
 
 ### Basic Usage
 
-Once inside the environment, you can start using Biomni:
+Once inside the environment, you can start using MyBioAI:
 
 ```python
 from biomni.agent import A1
 
 # Initialize the agent with data path, Data lake will be automatically downloaded on first run (~11GB)
+# You can use Claude (default)
 agent = A1(path='./data', llm='claude-sonnet-4-20250514')
+
+# Or use GPT-5
+agent = A1(path='./data', llm='gpt-5', source='OpenAI')
 
 # Execute biomedical tasks using natural language
 agent.go("Plan a CRISPR screen to identify genes that regulate T cell exhaustion, generate 32 genes that maximize the perturbation effect.")
@@ -155,16 +146,171 @@ from biomni.config import default_config
 from biomni.agent import A1
 
 # RECOMMENDED: Modify global defaults for consistency
-default_config.llm = "gpt-4"
+# Use GPT-5
+default_config.llm = "gpt-5"
+default_config.source = "OpenAI"
 default_config.timeout_seconds = 1200
 
+# Or use GPT-4
+default_config.llm = "gpt-4"
+default_config.source = "OpenAI"
+
+# Or use Claude (default)
+default_config.llm = "claude-sonnet-4-20250514"
+default_config.source = "Anthropic"
+
 # All agents AND database queries use these defaults
-agent = A1()  # Everything uses gpt-4, 1200s timeout
+agent = A1()  # Everything uses your configured model
 ```
 
 **Note**: Direct parameters to `A1()` only affect that agent's reasoning, not database queries. For consistent configuration across all operations, use `default_config` or environment variables.
 
 For detailed configuration options, see the **[Configuration Guide](docs/configuration.md)**.
+
+## 📚 Prompt Library
+
+MyBioAI includes a comprehensive **Prompt Library** system for managing, discovering, and executing reusable prompt templates for biomedical research tasks. The library provides:
+
+- **10+ Predefined Templates**: Ready-to-use prompts for common tasks (gene analysis, protein structure, drug discovery, literature review, etc.)
+- **Custom Prompts**: Create and save your own prompt templates
+- **Variable Substitution**: Parameterized prompts with `{variable}` placeholders
+- **Tool Bindings**: Pre-configure which biological tools to use for specific tasks
+- **Model Configuration**: Specify optimal LLM settings for different analyses
+- **Versioning**: Track changes and maintain multiple versions of prompts
+- **Discovery**: Search and filter prompts by category, tags, and popularity
+- **Analytics**: Track usage, performance, and effectiveness
+
+### Quick Start
+
+```bash
+# Set up Supabase (required for prompt library)
+export SUPABASE_URL=your_supabase_url
+export SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+
+# Load predefined prompts
+cd backend/services
+python load_predefined_prompts.py
+```
+
+### Using the Prompt Library API
+
+```python
+import requests
+
+# List available prompts
+prompts = requests.get("http://localhost:8000/api/prompts?category=genomics").json()
+
+# Execute a gene analysis prompt
+response = requests.post(
+    "http://localhost:8000/api/prompts/execute",
+    json={
+        "prompt_id": "gene-analysis-prompt-id",
+        "variables": {
+            "gene_symbol": "BRCA1",
+            "years": 5
+        }
+    }
+)
+
+print(response.json()["response"])
+```
+
+### Available Prompt Categories
+
+- **Genomics**: Gene function analysis, variant interpretation
+- **Protein Analysis**: Structure and function studies
+- **Drug Discovery**: Drug-target interactions, immunotherapy targets
+- **Literature Review**: Comprehensive research reviews
+- **Pathway Analysis**: Enrichment and network analysis
+- **Clinical Research**: Variant interpretation, cancer genomics
+- **Data Analysis**: RNA-seq, microbiome analysis
+
+### Documentation
+
+- **[Complete Guide](PROMPT_LIBRARY_GUIDE.md)**: Detailed documentation with examples
+- **[Quick Start](PROMPT_LIBRARY_QUICKSTART.md)**: 5-minute setup and common workflows
+- **[API Reference](http://localhost:8000/docs)**: Interactive API documentation
+
+## 🔄 Dynamic Model Selection
+
+Users can now **dynamically switch between Claude Sonnet 4 and GPT-5** on a per-request basis without restarting the server or editing code.
+
+### Features
+
+- **Default Model**: Claude Sonnet 4 (`claude-sonnet-4-20250514`)
+- **Available Models**: Claude Sonnet 4, GPT-5
+- **Per-Request Selection**: Choose model for each query
+- **No Server Restart**: Switch models on-the-fly
+- **Works with Streaming**: WebSocket streaming supports model selection
+
+### Quick Example
+
+```bash
+# Use default model (Claude Sonnet 4)
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is BRCA1?"}'
+
+# Use GPT-5
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What is BRCA1?",
+    "model": "gpt-5",
+    "source": "OpenAI"
+  }'
+```
+
+### Get Available Models
+
+```bash
+curl http://localhost:8000/api/models
+```
+
+For complete documentation and examples, see:
+
+- **[Model Selection Guide](MODEL_SELECTION_GUIDE.md)** - Complete API reference and examples
+- Test it: `python test_model_selection.py`
+
+### Example: Creating a Custom Prompt
+
+```python
+import requests
+
+# Create a custom pathway analysis prompt
+prompt = requests.post(
+    "http://localhost:8000/api/prompts",
+    json={
+        "title": "Custom Pathway Analysis",
+        "category": "pathway_analysis",
+        "prompt_template": "Analyze pathways for {disease} using genes: {gene_list}",
+        "variables": [
+            {"name": "disease", "type": "string", "required": True},
+            {"name": "gene_list", "type": "string", "required": True}
+        ],
+        "model_config": {
+            "model": "claude-sonnet-4-20250514",
+            "temperature": 0.3
+        },
+        "tool_bindings": {
+            "enabled_modules": ["systems_biology", "genomics"],
+            "use_tool_retriever": True
+        }
+    }
+).json()
+
+# Execute your custom prompt
+result = requests.post(
+    "http://localhost:8000/api/prompts/execute",
+    json={
+        "prompt_id": prompt["id"],
+        "variables": {
+            "disease": "Alzheimer's disease",
+            "gene_list": "APP,PSEN1,PSEN2,APOE"
+        }
+    }
+).json()
+```
 
 ## MCP (Model Context Protocol) Support
 

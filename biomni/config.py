@@ -34,6 +34,7 @@ class BiomniConfig:
     timeout_seconds: int = 600
 
     # LLM settings (API keys still from environment)
+    # Supported models: gpt-5, gpt-4, gpt-4-turbo, claude-sonnet-4-20250514, claude-3-5-sonnet-20241022, etc.
     llm: str = "claude-sonnet-4-20250514"
     temperature: float = 0.7
 

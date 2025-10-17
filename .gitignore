@@ -230,3 +230,6 @@ data/ddinter_raw/
 # Sphinx build
 /docs/build/
 /docs/source/api/
+
+# tests
+tests/

@@ -22,9 +22,10 @@ def get_llm(
 ) -> BaseChatModel:
     """
     Get a language model instance based on the specified model name and source.
-    This function supports models from OpenAI, Azure OpenAI, Anthropic, Ollama, Gemini, Bedrock, and custom model serving.
+    This function supports models from OpenAI (GPT-5, GPT-4, etc.), Azure OpenAI, Anthropic (Claude),
+    Ollama, Gemini, Bedrock, and custom model serving.
     Args:
-        model (str): The model name to use
+        model (str): The model name to use (e.g., 'gpt-5', 'gpt-4', 'claude-sonnet-4-20250514')
         temperature (float): Temperature setting for generation
         stop_sequences (list): Sequences that will stop generation
         source (str): Source provider: "OpenAI", "AzureOpenAI", "Anthropic", "Ollama", "Gemini", "Bedrock", or "Custom"

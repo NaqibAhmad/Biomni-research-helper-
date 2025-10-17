@@ -2272,7 +2272,7 @@ Each library is listed with its description to help you understand its functiona
                     self.update_system_prompt_with_selected_resources(selected_resources_names)
                 except Exception as retrieval_error:
                     logger.error(f"Error in resource retrieval: {retrieval_error}")
-                    yield {"output": f"Warning: Resource retrieval failed, continuing with default tools"}
+                    yield {"output": "Warning: Resource retrieval failed, continuing with default tools"}
 
             inputs = {"messages": [HumanMessage(content=prompt)], "next_step": None}
             config = {"recursion_limit": 100, "configurable": {"thread_id": 42}}  # Reduced recursion limit
