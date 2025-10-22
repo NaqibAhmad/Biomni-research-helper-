@@ -85,6 +85,9 @@ active_sessions: Dict[str, Dict[str, Any]] = {}
 # Prompt library service (initialized lazily when needed)
 prompt_library_service = None
 
+# Feedback service (initialized lazily when needed)
+feedback_service = None
+
 
 def get_prompt_library_service():
     """Get or initialize the prompt library service."""
@@ -103,6 +106,21 @@ def get_prompt_library_service():
             logger.warning(f"Prompt library service configuration error: {e}")
             return None
     return prompt_library_service
+
+
+def get_feedback_service():
+    """Get or initialize the feedback service."""
+    global feedback_service
+    if feedback_service is None:
+        try:
+            from backend.services.feedback_service import FeedbackService
+
+            feedback_service = FeedbackService()
+            logger.info("Feedback service initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize feedback service: {e}")
+            raise HTTPException(status_code=503, detail="Feedback service not available. Please configure Supabase.")
+    return feedback_service
 
 
 # Pydantic models for API requests/responses
@@ -278,6 +296,66 @@ class ExecutePromptResponse(BaseModel):
     tools_used: List[str] = Field(default_factory=list, description="Tools used")
     processing_time_ms: int = Field(..., description="Processing time in milliseconds")
     timestamp: datetime = Field(..., description="Execution timestamp")
+
+
+# ==================== FEEDBACK MODELS ====================
+
+
+class FeedbackSubmitRequest(BaseModel):
+    """Request model for submitting feedback"""
+
+    # Metadata
+    date: Optional[str] = Field(None, description="Date of the output")
+    output_id: str = Field(..., description="Output/Response ID")
+    prompt: str = Field(..., description="The prompt that generated the output")
+
+    # Task Type
+    task_types: List[str] = Field(default_factory=list, description="Task types (multiple allowed)")
+    task_type_other: Optional[str] = Field(None, description="Other task type if specified")
+
+    # Task Understanding
+    query_interpreted_correctly: Optional[str] = Field(None, description="Yes/No")
+    followed_instructions: Optional[str] = Field(None, description="Yes/Partial/No")
+    task_understanding_notes: Optional[str] = Field(None, description="Additional notes")
+    save_to_library: Optional[str] = Field(None, description="Yes/No, see below")
+
+    # Scientific Quality
+    accuracy: Optional[str] = Field(None, description="Good/Mixed/Poor")
+    completeness: Optional[str] = Field(None, description="Yes/Partial/No")
+    scientific_quality_notes: Optional[str] = Field(None, description="Notes/Corrections")
+
+    # Technical Performance
+    tools_invoked_correctly: Optional[str] = Field(None, description="Yes/No/Not Sure")
+    outputs_usable: Optional[str] = Field(None, description="Yes/Partial/No")
+    latency_acceptable: Optional[str] = Field(None, description="Yes/No")
+    technical_performance_notes: Optional[str] = Field(None, description="Additional notes")
+
+    # Output Clarity & Usability
+    readable_structured: Optional[str] = Field(None, description="Yes/Partial/No")
+    formatting_issues: Optional[str] = Field(None, description="None/Minor/Major")
+    output_clarity_notes: Optional[str] = Field(None, description="Additional notes")
+
+    # Prompt Handling & Logic
+    prompt_followed_instructions: Optional[str] = Field(None, description="Yes/Partial/No")
+    prompt_handling_notes: Optional[str] = Field(None, description="Additional notes")
+    logical_consistency: Optional[str] = Field(None, description="Strong/Mixed/Weak")
+    logical_consistency_notes: Optional[str] = Field(None, description="Additional notes")
+
+    # Overall Rating
+    overall_rating: Optional[str] = Field(
+        None, description="Excellent/Good but needs tweaks/Needs significant improvement"
+    )
+    overall_notes: Optional[str] = Field(None, description="Additional notes")
+
+
+class FeedbackResponse(BaseModel):
+    """Response model for feedback operations"""
+
+    success: bool = Field(..., description="Whether the operation was successful")
+    feedback_id: Optional[str] = Field(None, description="Feedback ID")
+    message: str = Field(..., description="Response message")
+    submitted_at: Optional[str] = Field(None, description="Submission timestamp")
+    error: Optional[str] = Field(None, description="Error message if failed")
 
 
 def initialize_agent(config: Optional[ConfigurationRequest] = None) -> A1:
@@ -1206,6 +1284,75 @@ async def get_user_prompt_stats(user_id: str = "anonymous"):
 
     except Exception as e:
         logger.error(f"Error getting user prompt stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== FEEDBACK ENDPOINTS ====================
+
+
+@app.get("/api/feedback/schema")
+async def get_feedback_schema():
+    """Get the feedback form schema for frontend integration."""
+    service = get_feedback_service()
+
+    try:
+        schema = service.get_feedback_schema()
+        return schema
+
+    except Exception as e:
+        logger.error(f"Error getting feedback schema: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/feedback", response_model=FeedbackResponse)
+async def submit_feedback(request: FeedbackSubmitRequest, user_id: str = "anonymous", session_id: Optional[str] = None):
+    """Submit user feedback for an AI response."""
+    service = get_feedback_service()
+
+    try:
+        # Convert request to dictionary
+        feedback_data = request.dict()
+
+        # Submit feedback with user and session info
+        result = service.submit_feedback(feedback_data, user_id=user_id, session_id=session_id)
+
+        return FeedbackResponse(**result)
+
+    except Exception as e:
+        logger.error(f"Error submitting feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/feedback/{feedback_id}")
+async def get_feedback_by_id(feedback_id: str, user_id: Optional[str] = None):
+    """Get a specific feedback entry by ID."""
+    service = get_feedback_service()
+
+    try:
+        feedback = service.get_feedback(feedback_id, user_id=user_id)
+        if feedback is None:
+            raise HTTPException(status_code=404, detail="Feedback not found")
+
+        return feedback
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/feedback")
+async def get_all_feedback(limit: Optional[int] = 100, user_id: Optional[str] = None, session_id: Optional[str] = None):
+    """Get all feedback entries."""
+    service = get_feedback_service()
+
+    try:
+        feedback_list = service.get_all_feedback(limit=limit, user_id=user_id, session_id=session_id)
+        return {"feedback": feedback_list, "count": len(feedback_list), "timestamp": datetime.now().isoformat()}
+
+    except Exception as e:
+        logger.error(f"Error getting all feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

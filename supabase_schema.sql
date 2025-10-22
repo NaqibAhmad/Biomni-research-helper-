@@ -594,7 +594,165 @@ CREATE TRIGGER increment_prompt_usage_trigger AFTER INSERT ON public.prompt_exec
     FOR EACH ROW EXECUTE FUNCTION increment_prompt_usage();
 
 -- =====================================================
--- 12. INITIAL DATA & CONFIGURATION
+-- 12. FEEDBACK SYSTEM
+-- =====================================================
+
+-- Feedback submissions table for user feedback on AI responses
+CREATE TABLE public.feedback_submissions (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    
+    -- User and session tracking
+    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    session_id UUID REFERENCES public.chat_sessions(id) ON DELETE SET NULL,
+    output_id TEXT NOT NULL, -- ID of the AI response being rated
+    
+    -- Metadata
+    date DATE,
+    prompt TEXT NOT NULL,
+    
+    -- Task Type (multiple selection)
+    task_types TEXT[] DEFAULT '{}',
+    task_type_other TEXT,
+    
+    -- Task Understanding
+    query_interpreted_correctly TEXT CHECK (query_interpreted_correctly IN ('Yes', 'No')),
+    followed_instructions TEXT CHECK (followed_instructions IN ('Yes', 'Partial', 'No')),
+    task_understanding_notes TEXT,
+    save_to_library TEXT CHECK (save_to_library IN ('Yes', 'No, see below')),
+    
+    -- Scientific Quality
+    accuracy TEXT CHECK (accuracy IN ('Good', 'Mixed', 'Poor')),
+    completeness TEXT CHECK (completeness IN ('Yes', 'Partial', 'No')),
+    scientific_quality_notes TEXT,
+    
+    -- Technical Performance
+    tools_invoked_correctly TEXT CHECK (tools_invoked_correctly IN ('Yes', 'No', 'Not Sure')),
+    outputs_usable TEXT CHECK (outputs_usable IN ('Yes', 'Partial', 'No')),
+    latency_acceptable TEXT CHECK (latency_acceptable IN ('Yes', 'No')),
+    technical_performance_notes TEXT,
+    
+    -- Output Clarity & Usability
+    readable_structured TEXT CHECK (readable_structured IN ('Yes', 'Partial', 'No')),
+    formatting_issues TEXT CHECK (formatting_issues IN ('None', 'Minor', 'Major')),
+    output_clarity_notes TEXT,
+    
+    -- Prompt Handling & Logic
+    prompt_followed_instructions TEXT CHECK (prompt_followed_instructions IN ('Yes', 'Partial', 'No')),
+    prompt_handling_notes TEXT,
+    logical_consistency TEXT CHECK (logical_consistency IN ('Strong', 'Mixed', 'Weak')),
+    logical_consistency_notes TEXT,
+    
+    -- Overall Rating
+    overall_rating TEXT CHECK (overall_rating IN ('Excellent', 'Good but needs tweaks', 'Needs significant improvement')),
+    overall_notes TEXT,
+    
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- =====================================================
+-- FEEDBACK INDEXES
+-- =====================================================
+
+CREATE INDEX idx_feedback_user_id ON public.feedback_submissions(user_id);
+CREATE INDEX idx_feedback_session_id ON public.feedback_submissions(session_id);
+CREATE INDEX idx_feedback_output_id ON public.feedback_submissions(output_id);
+CREATE INDEX idx_feedback_overall_rating ON public.feedback_submissions(overall_rating);
+CREATE INDEX idx_feedback_created_at ON public.feedback_submissions(created_at);
+CREATE INDEX idx_feedback_task_types ON public.feedback_submissions USING gin(task_types);
+
+-- =====================================================
+-- FEEDBACK RLS POLICIES
+-- =====================================================
+
+ALTER TABLE public.feedback_submissions ENABLE ROW LEVEL SECURITY;
+
+-- Users can view own feedback
+CREATE POLICY "Users can view own feedback" ON public.feedback_submissions
+    FOR SELECT USING (auth.uid() = user_id);
+
+-- Users can create own feedback
+CREATE POLICY "Users can create own feedback" ON public.feedback_submissions
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Users can update own feedback
+CREATE POLICY "Users can update own feedback" ON public.feedback_submissions
+    FOR UPDATE USING (auth.uid() = user_id);
+
+-- Users can delete own feedback
+CREATE POLICY "Users can delete own feedback" ON public.feedback_submissions
+    FOR DELETE USING (auth.uid() = user_id);
+
+-- Admins can view all feedback (optional - for analytics)
+-- Uncomment if you want admins to see all feedback
+-- CREATE POLICY "Admins can view all feedback" ON public.feedback_submissions
+--     FOR SELECT USING (
+--         EXISTS (
+--             SELECT 1 FROM public.users 
+--             WHERE id = auth.uid() 
+--             AND role = 'admin'
+--         )
+--     );
+
+-- =====================================================
+-- FEEDBACK TRIGGERS
+-- =====================================================
+
+CREATE TRIGGER update_feedback_updated_at BEFORE UPDATE ON public.feedback_submissions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- =====================================================
+-- FEEDBACK VIEWS FOR ANALYTICS
+-- =====================================================
+
+-- Feedback summary by user
+CREATE VIEW public.user_feedback_summary AS
+SELECT 
+    user_id,
+    COUNT(*) as total_feedback,
+    COUNT(*) FILTER (WHERE overall_rating = 'Excellent') as excellent_count,
+    COUNT(*) FILTER (WHERE overall_rating = 'Good but needs tweaks') as good_count,
+    COUNT(*) FILTER (WHERE overall_rating = 'Needs significant improvement') as needs_improvement_count,
+    AVG(CASE 
+        WHEN overall_rating = 'Excellent' THEN 5
+        WHEN overall_rating = 'Good but needs tweaks' THEN 3
+        WHEN overall_rating = 'Needs significant improvement' THEN 1
+        ELSE NULL
+    END) as avg_rating_score,
+    MAX(created_at) as last_feedback_at
+FROM public.feedback_submissions
+GROUP BY user_id;
+
+-- Feedback trends over time
+CREATE VIEW public.feedback_trends AS
+SELECT 
+    DATE_TRUNC('day', created_at) as feedback_date,
+    overall_rating,
+    COUNT(*) as count
+FROM public.feedback_submissions
+WHERE created_at >= NOW() - INTERVAL '30 days'
+GROUP BY DATE_TRUNC('day', created_at), overall_rating
+ORDER BY feedback_date DESC;
+
+-- Task type popularity
+CREATE VIEW public.feedback_task_types_stats AS
+SELECT 
+    UNNEST(task_types) as task_type,
+    COUNT(*) as usage_count,
+    AVG(CASE 
+        WHEN overall_rating = 'Excellent' THEN 5
+        WHEN overall_rating = 'Good but needs tweaks' THEN 3
+        WHEN overall_rating = 'Needs significant improvement' THEN 1
+        ELSE NULL
+    END) as avg_rating
+FROM public.feedback_submissions
+WHERE task_types IS NOT NULL AND array_length(task_types, 1) > 0
+GROUP BY UNNEST(task_types)
+ORDER BY usage_count DESC;
+
+-- =====================================================
+-- 13. INITIAL DATA & CONFIGURATION
 -- =====================================================
 
 -- Insert default system announcements
