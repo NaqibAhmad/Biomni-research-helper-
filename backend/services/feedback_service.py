@@ -7,6 +7,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from backend.utils.user_utils import ensure_user_exists, ensure_session_exists
+
 logger = logging.getLogger(__name__)
 
 
@@ -322,11 +324,12 @@ class FeedbackService:
         Raises:
             ValueError: If required fields are missing
         """
-        required_fields = ["prompt", "output_id"]
+        # Check for required fields
+        required_fields = ["prompt", "response", "output_id"]
 
         for field in required_fields:
             if field not in feedback_data or not feedback_data[field]:
-                raise ValueError(f"Required field missing: {field}")
+                raise ValueError(f"Required field missing or empty: '{field}'")
 
     def _store_feedback_supabase(
         self, feedback_data: dict[str, Any], user_id: str | None, session_id: str | None
@@ -342,36 +345,125 @@ class FeedbackService:
         Returns:
             Dictionary with submission confirmation
         """
+        # Handle anonymous users - don't include user_id if it's "anonymous" (database expects UUID)
+        # Only include user_id if it's a valid UUID string
+        if user_id and user_id != "anonymous":
+            # Validate it looks like a UUID (basic check)
+            if len(user_id) == 36 and user_id.count("-") == 4:
+                user_id_to_store = user_id
+            else:
+                logger.warning(f"Invalid user_id format: {user_id}, storing without user_id")
+                user_id_to_store = None
+        else:
+            logger.warning("Anonymous user attempting to submit feedback, storing without user_id")
+            user_id_to_store = None
+
         # Prepare data for Supabase
+        # Build supabase_data, only including fields that have values (not None)
+        # This prevents errors when columns don't exist or when None values aren't allowed
         supabase_data = {
-            "user_id": user_id,
-            "session_id": session_id,
             "output_id": feedback_data.get("output_id"),
-            "date": feedback_data.get("date"),
-            "prompt": feedback_data.get("prompt"),
-            "task_types": feedback_data.get("task_types", []),
-            "task_type_other": feedback_data.get("task_type_other"),
-            "query_interpreted_correctly": feedback_data.get("query_interpreted_correctly"),
-            "followed_instructions": feedback_data.get("followed_instructions"),
-            "task_understanding_notes": feedback_data.get("task_understanding_notes"),
-            "save_to_library": feedback_data.get("save_to_library"),
-            "accuracy": feedback_data.get("accuracy"),
-            "completeness": feedback_data.get("completeness"),
-            "scientific_quality_notes": feedback_data.get("scientific_quality_notes"),
-            "tools_invoked_correctly": feedback_data.get("tools_invoked_correctly"),
-            "outputs_usable": feedback_data.get("outputs_usable"),
-            "latency_acceptable": feedback_data.get("latency_acceptable"),
-            "technical_performance_notes": feedback_data.get("technical_performance_notes"),
-            "readable_structured": feedback_data.get("readable_structured"),
-            "formatting_issues": feedback_data.get("formatting_issues"),
-            "output_clarity_notes": feedback_data.get("output_clarity_notes"),
-            "prompt_followed_instructions": feedback_data.get("prompt_followed_instructions"),
-            "prompt_handling_notes": feedback_data.get("prompt_handling_notes"),
-            "logical_consistency": feedback_data.get("logical_consistency"),
-            "logical_consistency_notes": feedback_data.get("logical_consistency_notes"),
-            "overall_rating": feedback_data.get("overall_rating"),
-            "overall_notes": feedback_data.get("overall_notes"),
+            "prompt": feedback_data.get("prompt"),  # User's prompt/query
+            "response": feedback_data.get("response"),  # AI response being rated
         }
+
+        # Add optional fields only if they have values
+        if feedback_data.get("date"):
+            supabase_data["date"] = feedback_data.get("date")
+
+        task_types = feedback_data.get("task_types", [])
+        if task_types:
+            supabase_data["task_types"] = task_types
+
+        if feedback_data.get("task_type_other"):
+            supabase_data["task_type_other"] = feedback_data.get("task_type_other")
+
+        # Task Understanding fields
+        if feedback_data.get("query_interpreted_correctly"):
+            supabase_data["query_interpreted_correctly"] = feedback_data.get("query_interpreted_correctly")
+        if feedback_data.get("followed_instructions"):
+            supabase_data["followed_instructions"] = feedback_data.get("followed_instructions")
+        if feedback_data.get("task_understanding_notes"):
+            supabase_data["task_understanding_notes"] = feedback_data.get("task_understanding_notes")
+        if feedback_data.get("save_to_library"):
+            supabase_data["save_to_library"] = feedback_data.get("save_to_library")
+
+        # Scientific Quality fields
+        if feedback_data.get("accuracy"):
+            supabase_data["accuracy"] = feedback_data.get("accuracy")
+        if feedback_data.get("completeness"):
+            supabase_data["completeness"] = feedback_data.get("completeness")
+        if feedback_data.get("scientific_quality_notes"):
+            supabase_data["scientific_quality_notes"] = feedback_data.get("scientific_quality_notes")
+
+        # Technical Performance fields
+        if feedback_data.get("tools_invoked_correctly"):
+            supabase_data["tools_invoked_correctly"] = feedback_data.get("tools_invoked_correctly")
+        if feedback_data.get("outputs_usable"):
+            supabase_data["outputs_usable"] = feedback_data.get("outputs_usable")
+        if feedback_data.get("latency_acceptable"):
+            supabase_data["latency_acceptable"] = feedback_data.get("latency_acceptable")
+        if feedback_data.get("technical_performance_notes"):
+            supabase_data["technical_performance_notes"] = feedback_data.get("technical_performance_notes")
+
+        # Output Clarity fields
+        if feedback_data.get("readable_structured"):
+            supabase_data["readable_structured"] = feedback_data.get("readable_structured")
+        if feedback_data.get("formatting_issues"):
+            supabase_data["formatting_issues"] = feedback_data.get("formatting_issues")
+        if feedback_data.get("output_clarity_notes"):
+            supabase_data["output_clarity_notes"] = feedback_data.get("output_clarity_notes")
+
+        # Prompt Handling fields
+        if feedback_data.get("prompt_followed_instructions"):
+            supabase_data["prompt_followed_instructions"] = feedback_data.get("prompt_followed_instructions")
+        if feedback_data.get("prompt_handling_notes"):
+            supabase_data["prompt_handling_notes"] = feedback_data.get("prompt_handling_notes")
+        if feedback_data.get("logical_consistency"):
+            supabase_data["logical_consistency"] = feedback_data.get("logical_consistency")
+        if feedback_data.get("logical_consistency_notes"):
+            supabase_data["logical_consistency_notes"] = feedback_data.get("logical_consistency_notes")
+
+        # Overall Rating fields
+        if feedback_data.get("overall_rating"):
+            supabase_data["overall_rating"] = feedback_data.get("overall_rating")
+        if feedback_data.get("overall_notes"):
+            supabase_data["overall_notes"] = feedback_data.get("overall_notes")
+
+        # Validate user exists if provided (required for authenticated users)
+        # ensure_user_exists will automatically create the user if they exist in auth.users
+        if user_id_to_store:
+            logger.info(f"Checking/ensuring user {user_id_to_store} exists in public.users...")
+            if not ensure_user_exists(self.supabase, user_id_to_store):
+                logger.error(
+                    f"User {user_id_to_store} not found in public.users and could not be created. "
+                    f"This may indicate an authentication issue."
+                )
+                raise ValueError(
+                    f"User {user_id_to_store} not found in public.users and could not be created. "
+                    f"Cannot submit feedback. Please ensure you are properly authenticated."
+                )
+            supabase_data["user_id"] = user_id_to_store
+            logger.info(f"User {user_id_to_store} verified/created in users table, including in feedback")
+
+        # Validate session exists if provided, but don't fail if it doesn't exist
+        # This allows feedback to be submitted even if session wasn't properly created
+        if session_id:
+            logger.info(f"Attempting to link feedback to session: {session_id}")
+            if ensure_session_exists(self.supabase, session_id):
+                supabase_data["session_id"] = session_id
+                logger.info(f"Session {session_id} found and linked to feedback")
+            else:
+                # Session doesn't exist - log warning but allow feedback submission without session_id
+                logger.warning(
+                    f"Session {session_id} not found in database. "
+                    f"Submitting feedback without session_id link. "
+                    f"This may indicate the session was not properly created during chat."
+                )
+                # Don't include session_id in the data - let it be NULL
+                # This is more lenient and allows feedback even if session creation failed
+        else:
+            logger.debug("No session_id provided for feedback submission")
 
         # Insert into Supabase
         result = self.supabase.table("feedback_submissions").insert(supabase_data).execute()

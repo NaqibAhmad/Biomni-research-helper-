@@ -132,4 +132,76 @@ description = [
             }
         ],
     },
+    {
+        "description": "Search PubMed using NCBI E-utilities API for biomedical literature.",
+        "name": "search_pubmed_ncbi",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "relevance",
+                "description": "Sort order for results (relevance, date, author)",
+                "name": "sort",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query string for PubMed",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search Europe PMC for European biomedical literature.",
+        "name": "search_europe_pmc",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "relevance",
+                "description": "Sort order for results",
+                "name": "sort",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query string for Europe PMC",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search NIH Reporter for funded research projects.",
+        "name": "search_nih_reporter",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            }
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for NIH Reporter",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
 ]

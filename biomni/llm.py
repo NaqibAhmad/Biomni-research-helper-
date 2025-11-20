@@ -103,7 +103,24 @@ def get_llm(
             raise ImportError(  # noqa: B904
                 "langchain-openai package is required for OpenAI models. Install with: pip install langchain-openai"
             )
-        return ChatOpenAI(model=model, temperature=temperature, stop_sequences=stop_sequences)
+        # GPT-5 and some newer models don't support stop_sequences parameter
+        # Only include stop_sequences for models that support it
+        # Check for GPT-5 (exact match or starts with gpt-5), O-series models (o1-, o3-)
+        if model and (
+            model == "gpt-5" 
+            or model.startswith("gpt-5-") 
+            or model.startswith("o1-") 
+            or model.startswith("o3-")
+        ):
+            # GPT-5 and O-series models don't support stop sequences
+            return ChatOpenAI(model=model, temperature=temperature)
+        else:
+            # GPT-3.5, GPT-4, and other models support stop sequences
+            # Only pass stop_sequences if they are provided and not None
+            if stop_sequences:
+                return ChatOpenAI(model=model, temperature=temperature, stop_sequences=stop_sequences)
+            else:
+                return ChatOpenAI(model=model, temperature=temperature)
 
     elif source == "AzureOpenAI":
         try:

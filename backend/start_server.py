@@ -48,6 +48,20 @@ def main():
         # Start the server with minimal WebSocket optimizations
         # For production with ~10 users, single worker is sufficient
 
+        # Directories to watch for reloads (backend code only)
+        backend_dir = Path(__file__).parent
+        reload_dirs = [str(backend_dir)]
+
+        # Exclude noisy paths that cause infinite reload loops (logs, data, frontend build artifacts)
+        reload_excludes = [
+            "biomni_api.log",  # log file being written continuously
+            "**/generated_images/**",
+            "**/data_lake/**",
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/.git/**",
+        ]
+
         uvicorn.run(
             "api_server:app",
             host=host,
@@ -56,6 +70,8 @@ def main():
             log_level=log_level,
             access_log=True,
             timeout_keep_alive=120,  # Keep connections alive for 2 minutes
+            reload_dirs=reload_dirs,
+            reload_excludes=reload_excludes,
         )
 
         # For higher load (100+ users), uncomment the optimized version below

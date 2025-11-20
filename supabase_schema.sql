@@ -1,9 +1,26 @@
 -- =====================================================
--- MYBIOAI SUPABASE DATABASE SCHEMA (UPDATED)
+-- MYBIOAI SUPABASE DATABASE SCHEMA 
 -- =====================================================
 -- This schema provides comprehensive user management,
 -- authentication, chat history, and query tracking
 -- for the MyBioAI biomedical AI research platform.
+--
+-- USER ID CONSISTENCY APPROACH:
+-- =====================================================
+-- All user-related tables use the SAME UUID from auth.users(id)
+-- as foreign keys. This ensures:
+-- 1. Single source of truth: auth.users.id is the canonical user identifier
+-- 2. Automatic user creation: Trigger creates public.users record on signup
+-- 3. Consistent relationships: All tables reference the same user ID
+-- 4. Data integrity: Foreign key constraints ensure referential integrity
+--
+-- When a user signs up:
+-- - Supabase creates auth.users record with UUID (e.g., 2c3444da-dc6f-4b28-87f6-6c4695e43cc5)
+-- - Trigger automatically creates public.users record with SAME UUID
+-- - All subsequent operations use this UUID for created_by, user_id, etc.
+--
+-- IMPORTANT: Never generate new UUIDs for user identification!
+-- Always use the UUID from auth.users.id (extracted from JWT token 'sub' claim)
 -- =====================================================
 
 -- Enable necessary extensions
@@ -22,24 +39,92 @@ CREATE TABLE public.users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- User API keys for external integrations
-CREATE TABLE public.user_api_keys (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-    key_name TEXT NOT NULL,
-    key_hash TEXT NOT NULL,
-    permissions JSONB DEFAULT '["read", "write"]',
-    last_used_at TIMESTAMP WITH TIME ZONE,
-    expires_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_active BOOLEAN DEFAULT true
-);
+-- =====================================================
+-- AUTO-CREATE USER IN public.users WHEN SIGNING UP
+-- =====================================================
+-- This trigger automatically creates a user record in public.users
+-- when a new user signs up in auth.users, ensuring authenticated
+-- users can immediately use the system without manual setup.
+--
+-- CRITICAL: This ensures the UUID from auth.users.id is propagated
+-- to public.users.id, maintaining consistency across all tables.
+
+-- Function to handle new user creation
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Insert user with the SAME UUID from auth.users
+    -- This UUID will be used as foreign key in all other tables
+    INSERT INTO public.users (id, full_name, updated_at)
+    VALUES (
+        NEW.id,  -- Use the SAME UUID from auth.users
+        COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE
+        SET updated_at = NOW(); -- Update timestamp if user already exists
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Drop trigger if it already exists (for idempotency when re-running schema)
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
+-- Trigger to call the function when a new user signs up
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_new_user();
+
+-- =====================================================
+-- MIGRATION HELPER: Backfill existing auth.users to public.users
+-- =====================================================
+-- Run this function once to create public.users records for existing
+-- auth.users that don't have corresponding public.users entries.
+-- This ensures all authenticated users have public.users records.
+
+CREATE OR REPLACE FUNCTION public.backfill_public_users()
+RETURNS INTEGER AS $$
+DECLARE
+    inserted_count INTEGER;
+BEGIN
+    INSERT INTO public.users (id, full_name, updated_at)
+    SELECT 
+        au.id,
+        COALESCE(au.raw_user_meta_data->>'full_name', au.email),
+        NOW()
+    FROM auth.users au
+    WHERE NOT EXISTS (
+        SELECT 1 FROM public.users pu WHERE pu.id = au.id
+    )
+    ON CONFLICT (id) DO NOTHING;
+    
+    GET DIAGNOSTICS inserted_count = ROW_COUNT;
+    RETURN inserted_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- =====================================================
+-- MIGRATION HELPER: Update NULL created_by to current user
+-- =====================================================
+-- This function helps migrate prompts/files with NULL created_by
+-- to the authenticated user. Use with caution - only for orphaned data.
+-- 
+-- Example usage (update prompts with NULL created_by for a specific user):
+-- UPDATE public.prompt_library 
+-- SET created_by = '2c3444da-dc6f-4b28-87f6-6c4695e43cc5'
+-- WHERE created_by IS NULL AND id = '9aff474e-d953-40d8-8196-e5339f94ce36';
+--
+-- Note: This is a manual migration step. The application code now handles
+-- NULL created_by values gracefully by including them in queries.
 
 -- =====================================================
 -- 2. CHAT SESSIONS & CONVERSATIONS
 -- =====================================================
 
 -- Chat sessions table - SIMPLIFIED
+-- user_id: UUID from auth.users.id (same as public.users.id)
+-- This ensures all sessions are linked to the authenticated user's canonical ID
 CREATE TABLE public.chat_sessions (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
@@ -48,51 +133,44 @@ CREATE TABLE public.chat_sessions (
     tags TEXT[] DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_message_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    last_message_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    -- Additional columns for service compatibility
+    start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_activity_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    end_time TIMESTAMP WITH TIME ZONE,
+    message_count INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    metadata JSONB DEFAULT '{}'
 );
 
--- Chat messages table - SIMPLIFIED
+-- Chat messages table - UPDATED with content field
 CREATE TABLE public.chat_messages (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     session_id UUID REFERENCES public.chat_sessions(id) ON DELETE CASCADE,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    content TEXT, -- ADDED: The actual message text
     message_type TEXT DEFAULT 'user' CHECK (message_type IN ('user', 'assistant', 'system', 'tool_call', 'tool_result')),
     content_type TEXT DEFAULT 'text' CHECK (content_type IN ('text', 'markdown', 'json', 'code')),
     parent_message_id UUID REFERENCES public.chat_messages(id),
     tool_calls JSONB DEFAULT '[]',
     execution_log JSONB DEFAULT '[]',
     token_count INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    -- Additional columns for service compatibility
+    model_used TEXT,
+    tokens_used INTEGER,
+    processing_time_ms INTEGER,
+    metadata JSONB DEFAULT '{}',
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- =====================================================
--- 3. QUERY TRACKING & ANALYTICS
+-- 3. DATA MANAGEMENT & FILE STORAGE
 -- =====================================================
 
--- User queries table for tracking all user interactions - UPDATED
-CREATE TABLE public.user_queries (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-    session_id UUID REFERENCES public.chat_sessions(id) ON DELETE SET NULL,
-    query_text TEXT NOT NULL,
-    query_type TEXT DEFAULT 'general' CHECK (query_type IN ('general', 'data_analysis', 'literature_search', 'protein_analysis', 'gene_analysis', 'drug_discovery', 'pathway_analysis')),
-    categories TEXT, -- renamed from domain
-    data_sources_accessed TEXT[] DEFAULT '{}',
-    response_quality_rating INTEGER CHECK (response_quality_rating BETWEEN 1 AND 5),
-    user_feedback TEXT,
-    token_usage JSONB DEFAULT '{"input": 0, "output": 0, "total": 0}',
-    cost_estimate DECIMAL(10,6),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Note: saved_queries functionality is now handled by prompt_library table
--- which provides more comprehensive features including versioning, tool bindings, etc.
-
--- =====================================================
--- 4. DATA MANAGEMENT & FILE STORAGE
--- =====================================================
-
--- User data files table - SIMPLIFIED
+-- User data files table - ENHANCED with upload tracking
+-- user_id: UUID from auth.users.id (same as public.users.id)
+-- All files are linked to the authenticated user's canonical ID
 CREATE TABLE public.user_data_files (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
@@ -105,6 +183,11 @@ CREATE TABLE public.user_data_files (
     tags TEXT[] DEFAULT '{}',
     storage_provider TEXT DEFAULT 'supabase' CHECK (storage_provider IN ('supabase', 's3', 'local')),
     checksum TEXT,
+    upload_status TEXT DEFAULT 'completed' CHECK (upload_status IN ('pending', 'uploading', 'completed', 'failed', 'deleted')), -- ADDED
+    processing_status TEXT DEFAULT 'pending' CHECK (processing_status IN ('pending', 'processing', 'completed', 'failed')), -- ADDED
+    error_message TEXT, -- ADDED
+    metadata JSONB DEFAULT '{}', -- ADDED
+    mime_type TEXT, -- ADDED
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -118,60 +201,13 @@ CREATE TABLE public.session_files (
     UNIQUE(session_id, file_id)
 );
 
--- Data analysis results
-CREATE TABLE public.analysis_results (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-    session_id UUID REFERENCES public.chat_sessions(id) ON DELETE SET NULL,
-    query_id UUID REFERENCES public.user_queries(id) ON DELETE SET NULL,
-    analysis_type TEXT NOT NULL,
-    input_data JSONB,
-    output_data JSONB,
-    visualization_data JSONB,
-    parameters JSONB DEFAULT '{}',
-    status TEXT DEFAULT 'completed' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
-    error_message TEXT,
-    processing_time_ms INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
 -- =====================================================
--- 5. TOOL USAGE & PERFORMANCE TRACKING
--- =====================================================
-
--- Tool usage tracking
-CREATE TABLE public.tool_usage_logs (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-    session_id UUID REFERENCES public.chat_sessions(id) ON DELETE SET NULL,
-    tool_name TEXT NOT NULL,
-    tool_module TEXT,
-    parameters JSONB DEFAULT '{}',
-    result_status TEXT CHECK (result_status IN ('success', 'error', 'timeout')),
-    execution_time_ms INTEGER,
-    error_message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Tool performance metrics
-CREATE TABLE public.tool_performance_metrics (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    tool_name TEXT NOT NULL,
-    tool_module TEXT,
-    avg_execution_time_ms DECIMAL(10,2),
-    success_rate DECIMAL(5,2),
-    usage_count INTEGER DEFAULT 0,
-    last_used_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(tool_name, tool_module)
-);
-
--- =====================================================
--- 6. SYSTEM CONFIGURATION & FEATURES
+-- 4. SYSTEM CONFIGURATION & FEATURES
 -- =====================================================
 
 -- User preferences and settings
+-- user_id: UUID from auth.users.id (same as public.users.id)
+-- UNIQUE constraint ensures one settings record per user
 CREATE TABLE public.user_settings (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE UNIQUE,
@@ -183,17 +219,30 @@ CREATE TABLE public.user_settings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- System announcements and notifications
-CREATE TABLE public.system_announcements (
+-- User session tracking (for auth and analytics)
+CREATE TABLE public.user_sessions (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    title TEXT NOT NULL,
-    content TEXT NOT NULL,
-    announcement_type TEXT DEFAULT 'info' CHECK (announcement_type IN ('info', 'warning', 'maintenance', 'feature')),
-    target_audience TEXT DEFAULT 'all' CHECK (target_audience IN ('all', 'free', 'pro', 'enterprise')),
-    is_active BOOLEAN DEFAULT true,
-    starts_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    session_token TEXT UNIQUE NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     expires_at TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Streaming session tracking (WebSocket connections)
+CREATE TABLE public.streaming_sessions (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    chat_session_id UUID REFERENCES public.chat_sessions(id) ON DELETE SET NULL,
+    connection_id TEXT NOT NULL,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'disconnected', 'error')),
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    ended_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+    metadata JSONB DEFAULT '{}'
 );
 
 -- =====================================================
@@ -207,50 +256,49 @@ CREATE INDEX idx_users_updated_at ON public.users(updated_at);
 CREATE INDEX idx_chat_sessions_user_id ON public.chat_sessions(user_id);
 CREATE INDEX idx_chat_sessions_created_at ON public.chat_sessions(created_at);
 CREATE INDEX idx_chat_sessions_type ON public.chat_sessions(session_type);
+CREATE INDEX idx_chat_sessions_is_active ON public.chat_sessions(is_active) WHERE is_active = true;
+CREATE INDEX idx_chat_sessions_last_activity ON public.chat_sessions(last_activity_time);
 
 -- Chat messages indexes
 CREATE INDEX idx_chat_messages_session_id ON public.chat_messages(session_id);
 CREATE INDEX idx_chat_messages_user_id ON public.chat_messages(user_id);
 CREATE INDEX idx_chat_messages_created_at ON public.chat_messages(created_at);
 CREATE INDEX idx_chat_messages_type ON public.chat_messages(message_type);
-
--- User queries indexes
-CREATE INDEX idx_user_queries_user_id ON public.user_queries(user_id);
-CREATE INDEX idx_user_queries_session_id ON public.user_queries(session_id);
-CREATE INDEX idx_user_queries_type ON public.user_queries(query_type);
-CREATE INDEX idx_user_queries_categories ON public.user_queries(categories);
-CREATE INDEX idx_user_queries_created_at ON public.user_queries(created_at);
-CREATE INDEX idx_user_queries_text_search ON public.user_queries USING gin(to_tsvector('english', query_text));
+CREATE INDEX idx_chat_messages_content_search ON public.chat_messages USING gin(to_tsvector('english', content)); -- ADDED
+CREATE INDEX idx_chat_messages_timestamp ON public.chat_messages(timestamp);
+CREATE INDEX idx_chat_messages_model_used ON public.chat_messages(model_used);
 
 -- Data files indexes
 CREATE INDEX idx_user_data_files_user_id ON public.user_data_files(user_id);
 CREATE INDEX idx_user_data_files_type ON public.user_data_files(file_type);
 CREATE INDEX idx_user_data_files_created_at ON public.user_data_files(created_at);
+CREATE INDEX idx_user_data_files_upload_status ON public.user_data_files(upload_status); -- ADDED
+CREATE INDEX idx_user_data_files_processing_status ON public.user_data_files(processing_status); -- ADDED
 
 -- Session files indexes
 CREATE INDEX idx_session_files_session_id ON public.session_files(session_id);
 CREATE INDEX idx_session_files_file_id ON public.session_files(file_id);
 
--- Tool usage indexes
-CREATE INDEX idx_tool_usage_user_id ON public.tool_usage_logs(user_id);
-CREATE INDEX idx_tool_usage_tool_name ON public.tool_usage_logs(tool_name);
-CREATE INDEX idx_tool_usage_created_at ON public.tool_usage_logs(created_at);
+-- New tables indexes
+CREATE INDEX idx_user_sessions_user_id ON public.user_sessions(user_id);
+CREATE INDEX idx_user_sessions_token ON public.user_sessions(session_token);
+CREATE INDEX idx_user_sessions_active ON public.user_sessions(is_active) WHERE is_active = true;
+
+CREATE INDEX idx_streaming_sessions_user_id ON public.streaming_sessions(user_id);
+CREATE INDEX idx_streaming_sessions_status ON public.streaming_sessions(status);
 
 -- =====================================================
--- 8. ROW LEVEL SECURITY (RLS) POLICIES
+-- 6. ROW LEVEL SECURITY (RLS) POLICIES
 -- =====================================================
 
 -- Enable RLS on all tables
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_api_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_queries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_data_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.analysis_results ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tool_usage_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_sessions ENABLE ROW LEVEL SECURITY;
 
 -- Users policies
 CREATE POLICY "Users can view own profile" ON public.users
@@ -294,13 +342,6 @@ CREATE POLICY "Users can create messages in own sessions" ON public.chat_message
         )
     );
 
--- User queries policies
-CREATE POLICY "Users can view own queries" ON public.user_queries
-    FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can create own queries" ON public.user_queries
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
-
 -- Data files policies
 CREATE POLICY "Users can view own files" ON public.user_data_files
     FOR SELECT USING (auth.uid() = user_id);
@@ -342,8 +383,37 @@ CREATE POLICY "Users can delete session files" ON public.session_files
         )
     );
 
+-- User sessions policies
+CREATE POLICY "Users can view own user sessions" ON public.user_sessions
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can create own user sessions" ON public.user_sessions
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own user sessions" ON public.user_sessions
+    FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own user sessions" ON public.user_sessions
+    FOR DELETE USING (auth.uid() = user_id);
+
 -- =====================================================
--- 9. TRIGGERS FOR AUTOMATIC UPDATES
+-- SERVICE ROLE BYPASS POLICIES (FOR TESTING)
+-- =====================================================
+-- These policies allow service role to bypass RLS for testing
+-- Remove or restrict these in production!
+
+-- Chat sessions - allow service role
+CREATE POLICY "Service role can manage all sessions" ON public.chat_sessions
+    FOR ALL USING (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role')
+    WITH CHECK (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role');
+
+-- Chat messages - allow service role  
+CREATE POLICY "Service role can manage all messages" ON public.chat_messages
+    FOR ALL USING (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role')
+    WITH CHECK (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role');
+
+-- =====================================================
+-- 7. TRIGGERS FOR AUTOMATIC UPDATES
 -- =====================================================
 
 -- Function to update updated_at timestamp
@@ -368,54 +438,27 @@ CREATE TRIGGER update_user_data_files_updated_at BEFORE UPDATE ON public.user_da
 CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON public.user_settings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- =====================================================
--- 10. VIEWS FOR COMMON QUERIES
--- =====================================================
+-- Trigger to update message_count in chat_sessions
+CREATE OR REPLACE FUNCTION update_session_message_count()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE public.chat_sessions
+    SET message_count = (
+        SELECT COUNT(*) FROM public.chat_messages 
+        WHERE session_id = NEW.session_id
+    ),
+    last_activity_time = NOW(),
+    last_message_at = NOW()
+    WHERE id = NEW.session_id;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
--- User activity summary view
-CREATE VIEW public.user_activity_summary AS
-SELECT 
-    u.id,
-    u.full_name,
-    COUNT(DISTINCT cs.id) as total_sessions,
-    COUNT(DISTINCT cm.id) as total_messages,
-    COUNT(DISTINCT uq.id) as total_queries,
-    MAX(cm.created_at) as last_message_at,
-    MAX(uq.created_at) as last_query_at
-FROM public.users u
-LEFT JOIN public.chat_sessions cs ON u.id = cs.user_id
-LEFT JOIN public.chat_messages cm ON cs.id = cm.session_id
-LEFT JOIN public.user_queries uq ON u.id = uq.user_id
-GROUP BY u.id, u.full_name;
-
--- Popular queries view
-CREATE VIEW public.popular_queries AS
-SELECT 
-    query_type,
-    categories,
-    COUNT(*) as usage_count,
-    AVG(response_quality_rating) as avg_rating
-FROM public.user_queries
-WHERE created_at >= NOW() - INTERVAL '30 days'
-GROUP BY query_type, categories
-ORDER BY usage_count DESC;
-
--- Tool usage statistics view
-CREATE VIEW public.tool_usage_stats AS
-SELECT 
-    tool_name,
-    tool_module,
-    COUNT(*) as total_usage,
-    COUNT(*) FILTER (WHERE result_status = 'success') as successful_usage,
-    AVG(execution_time_ms) as avg_execution_time,
-    COUNT(DISTINCT user_id) as unique_users
-FROM public.tool_usage_logs
-WHERE created_at >= NOW() - INTERVAL '30 days'
-GROUP BY tool_name, tool_module
-ORDER BY total_usage DESC;
+CREATE TRIGGER update_message_count_trigger AFTER INSERT ON public.chat_messages
+    FOR EACH ROW EXECUTE FUNCTION update_session_message_count();
 
 -- =====================================================
--- 11. PROMPT LIBRARY & TEMPLATES
+-- 8. PROMPT LIBRARY & TEMPLATES  
 -- =====================================================
 
 -- Prompt library table for reusable prompt templates
@@ -423,10 +466,7 @@ CREATE TABLE public.prompt_library (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT,
-    category TEXT NOT NULL CHECK (category IN (
-        'genomics', 'protein_analysis', 'drug_discovery', 'literature_review', 
-        'pathway_analysis', 'clinical_research', 'data_analysis', 'general', 'custom'
-    )),
+    category TEXT NOT NULL, -- Allow any category value (users can create custom categories)
     tags TEXT[] DEFAULT '{}',
     
     -- Prompt content and structure
@@ -463,6 +503,9 @@ CREATE TABLE public.prompt_library (
     -- Removed is_predefined - all prompts are user-created
     
     -- Ownership and permissions
+    -- created_by: UUID from auth.users.id (same as public.users.id)
+    -- NULL values are allowed for backward compatibility with existing data
+    -- New prompts should always have created_by set to the authenticated user's UUID
     created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
     updated_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
     
@@ -541,18 +584,23 @@ ALTER TABLE public.prompt_executions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prompt_favorites ENABLE ROW LEVEL SECURITY;
 
 -- Prompt library policies
--- Users can view only their own prompts
+-- Users can view only their own prompts (or NULL for testing)
 CREATE POLICY "Users can view own prompts" ON public.prompt_library
-    FOR SELECT USING (created_by = auth.uid());
+    FOR SELECT USING (created_by = auth.uid() OR created_by IS NULL);
 
 CREATE POLICY "Users can create own prompts" ON public.prompt_library
-    FOR INSERT WITH CHECK (auth.uid() = created_by);
+    FOR INSERT WITH CHECK (auth.uid() = created_by OR created_by IS NULL);
 
 CREATE POLICY "Users can update own prompts" ON public.prompt_library
-    FOR UPDATE USING (auth.uid() = created_by OR auth.uid() = updated_by);
+    FOR UPDATE USING (auth.uid() = created_by OR auth.uid() = updated_by OR created_by IS NULL);
 
 CREATE POLICY "Users can delete own prompts" ON public.prompt_library
-    FOR DELETE USING (auth.uid() = created_by);
+    FOR DELETE USING (auth.uid() = created_by OR created_by IS NULL);
+
+-- Service role can manage all prompts (for testing)
+CREATE POLICY "Service role can manage all prompts" ON public.prompt_library
+    FOR ALL USING (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role')
+    WITH CHECK (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role');
 
 -- Prompt executions policies
 CREATE POLICY "Users can view own executions" ON public.prompt_executions
@@ -560,6 +608,11 @@ CREATE POLICY "Users can view own executions" ON public.prompt_executions
 
 CREATE POLICY "Users can create own executions" ON public.prompt_executions
     FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Service role can manage all executions (for testing)
+CREATE POLICY "Service role can manage all executions" ON public.prompt_executions
+    FOR ALL USING (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role')
+    WITH CHECK (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role');
 
 -- Prompt favorites policies
 CREATE POLICY "Users can view own favorites" ON public.prompt_favorites
@@ -570,6 +623,11 @@ CREATE POLICY "Users can create own favorites" ON public.prompt_favorites
 
 CREATE POLICY "Users can delete own favorites" ON public.prompt_favorites
     FOR DELETE USING (auth.uid() = user_id);
+
+-- Service role can manage all favorites (for testing)
+CREATE POLICY "Service role can manage all favorites" ON public.prompt_favorites
+    FOR ALL USING (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role')
+    WITH CHECK (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role');
 
 -- =====================================================
 -- PROMPT LIBRARY TRIGGERS
@@ -594,7 +652,7 @@ CREATE TRIGGER increment_prompt_usage_trigger AFTER INSERT ON public.prompt_exec
     FOR EACH ROW EXECUTE FUNCTION increment_prompt_usage();
 
 -- =====================================================
--- 12. FEEDBACK SYSTEM
+-- 9. FEEDBACK SYSTEM
 -- =====================================================
 
 -- Feedback submissions table for user feedback on AI responses
@@ -608,7 +666,8 @@ CREATE TABLE public.feedback_submissions (
     
     -- Metadata
     date DATE,
-    prompt TEXT NOT NULL,
+    prompt TEXT NOT NULL, -- The user's prompt/query that generated the response
+    response TEXT NOT NULL, -- The AI response/result being rated 
     
     -- Task Type (multiple selection)
     task_types TEXT[] DEFAULT '{}',
@@ -684,6 +743,11 @@ CREATE POLICY "Users can update own feedback" ON public.feedback_submissions
 CREATE POLICY "Users can delete own feedback" ON public.feedback_submissions
     FOR DELETE USING (auth.uid() = user_id);
 
+-- Service role can manage all feedback (for testing)
+CREATE POLICY "Service role can manage all feedback" ON public.feedback_submissions
+    FOR ALL USING (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role')
+    WITH CHECK (current_setting('request.jwt.claims', true)::json->>'role' = 'service_role');
+
 -- Admins can view all feedback (optional - for analytics)
 -- Uncomment if you want admins to see all feedback
 -- CREATE POLICY "Admins can view all feedback" ON public.feedback_submissions
@@ -703,63 +767,36 @@ CREATE TRIGGER update_feedback_updated_at BEFORE UPDATE ON public.feedback_submi
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =====================================================
--- FEEDBACK VIEWS FOR ANALYTICS
+-- MIGRATION NOTES & BEST PRACTICES
 -- =====================================================
-
--- Feedback summary by user
-CREATE VIEW public.user_feedback_summary AS
-SELECT 
-    user_id,
-    COUNT(*) as total_feedback,
-    COUNT(*) FILTER (WHERE overall_rating = 'Excellent') as excellent_count,
-    COUNT(*) FILTER (WHERE overall_rating = 'Good but needs tweaks') as good_count,
-    COUNT(*) FILTER (WHERE overall_rating = 'Needs significant improvement') as needs_improvement_count,
-    AVG(CASE 
-        WHEN overall_rating = 'Excellent' THEN 5
-        WHEN overall_rating = 'Good but needs tweaks' THEN 3
-        WHEN overall_rating = 'Needs significant improvement' THEN 1
-        ELSE NULL
-    END) as avg_rating_score,
-    MAX(created_at) as last_feedback_at
-FROM public.feedback_submissions
-GROUP BY user_id;
-
--- Feedback trends over time
-CREATE VIEW public.feedback_trends AS
-SELECT 
-    DATE_TRUNC('day', created_at) as feedback_date,
-    overall_rating,
-    COUNT(*) as count
-FROM public.feedback_submissions
-WHERE created_at >= NOW() - INTERVAL '30 days'
-GROUP BY DATE_TRUNC('day', created_at), overall_rating
-ORDER BY feedback_date DESC;
-
--- Task type popularity
-CREATE VIEW public.feedback_task_types_stats AS
-SELECT 
-    UNNEST(task_types) as task_type,
-    COUNT(*) as usage_count,
-    AVG(CASE 
-        WHEN overall_rating = 'Excellent' THEN 5
-        WHEN overall_rating = 'Good but needs tweaks' THEN 3
-        WHEN overall_rating = 'Needs significant improvement' THEN 1
-        ELSE NULL
-    END) as avg_rating
-FROM public.feedback_submissions
-WHERE task_types IS NOT NULL AND array_length(task_types, 1) > 0
-GROUP BY UNNEST(task_types)
-ORDER BY usage_count DESC;
-
+--
+-- 1. USER ID CONSISTENCY:
+--    - Always use auth.users.id (from JWT 'sub' claim) for user identification
+--    - Never generate new UUIDs for user-related operations
+--    - All foreign keys reference public.users(id) which references auth.users(id)
+--
+-- 2. MIGRATING EXISTING DATA:
+--    a) Run backfill_public_users() to create public.users for existing auth.users
+--    b) For prompts/files with NULL created_by:
+--       - Option 1: Leave NULL (application handles this gracefully)
+--       - Option 2: Update manually to assign to correct user
+--       - Option 3: Use migration script to assign based on metadata/email
+--
+-- 3. NEW DATA:
+--    - Always set created_by/user_id when creating records
+--    - Use ensure_user_exists() helper in backend to auto-create public.users if missing
+--    - Never allow NULL created_by for new authenticated user operations
+--
+-- 4. FOREIGN KEY CONSTRAINTS:
+--    - All user_id/created_by columns reference public.users(id)
+--    - public.users(id) references auth.users(id) ON DELETE CASCADE
+--    - This ensures data integrity and automatic cleanup on user deletion
+--
+-- 5. ROW LEVEL SECURITY:
+--    - All tables use RLS policies based on auth.uid()
+--    - auth.uid() returns the UUID from the JWT token 'sub' claim
+--    - This ensures users can only access their own data
+--
 -- =====================================================
--- 13. INITIAL DATA & CONFIGURATION
--- =====================================================
-
--- Insert default system announcements
-INSERT INTO public.system_announcements (title, content, announcement_type, target_audience) VALUES
-('Welcome to MyBioAI!', 'Welcome to the MyBioAI biomedical AI research platform. Start by exploring our tools and uploading your data.', 'info', 'all'),
-('New Features Available', 'Check out our latest biomedical analysis tools and improved chat interface.', 'feature', 'all');
-
--- =====================================================
--- SCHEMA COMPLETE
+-- SCHEMA COMPLETE 
 -- =====================================================

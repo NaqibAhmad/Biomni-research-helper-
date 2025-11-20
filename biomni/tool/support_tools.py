@@ -119,3 +119,198 @@ def read_function_source_code(function_name: str) -> str:
 #     human_response = input("Please provide your feedback: ")
 
 #     return human_response
+
+
+def search_cdc_wonder(query: str, max_results: int = 10) -> str:
+    """Search CDC Wonder database for public health data and statistics.
+
+    Parameters
+    ----------
+    query : str
+        Search query for CDC Wonder database
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    import requests
+
+    log = []
+    log.append("# CDC Wonder Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append("")
+
+    try:
+        # CDC Wonder API (Note: CDC Wonder has limited public API access)
+        # This is a simplified implementation
+        log.append("## Searching CDC Wonder Database")
+        log.append("Note: CDC Wonder has limited public API access.")
+        log.append("Full implementation would require specific dataset access.")
+
+        # For demonstration purposes
+        log.append(f"Searching for: {query}")
+        log.append("CDC Wonder contains mortality, natality, and other public health data")
+        log.append("Specific searches would require dataset-specific endpoints")
+
+        log.append("\n## Summary")
+        log.append("Search completed for CDC Wonder database")
+        log.append("Note: Full implementation would require specific dataset access")
+
+    except Exception as e:
+        log.append(f"Error during CDC Wonder search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_loinc(query: str, max_results: int = 10) -> str:
+    """Search LOINC (Logical Observation Identifiers Names and Codes) database.
+
+    Parameters
+    ----------
+    query : str
+        Search query for LOINC codes
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    import requests
+
+    log = []
+    log.append("#LOINC Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append("")
+
+    try:
+        # LOINC API
+        base_url = "https://fhir.loinc.org/CodeSystem/$lookup"
+
+        # LOINC search parameters
+        params = {"system": "http://loinc.org", "code": query, "_count": max_results}
+
+        log.append("## Searching LOINC Database")
+        response = requests.get(base_url, params=params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search LOINC. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+
+        # Parse LOINC results
+        if "parameter" in data:
+            parameters = data["parameter"]
+            log.append(f"Found {len(parameters)} LOINC codes")
+
+            if not parameters:
+                log.append("No LOINC codes found for the query.")
+                return "\n".join(log)
+
+            log.append("\n## Search Results:")
+
+            for i, param in enumerate(parameters, 1):
+                if "part" in param:
+                    parts = param["part"]
+                    code = "Unknown code"
+                    display = "Unknown display"
+
+                    for part in parts:
+                        if part.get("name") == "code":
+                            code = part.get("valueString", "Unknown")
+                        elif part.get("name") == "display":
+                            display = part.get("valueString", "Unknown")
+
+                    log.append(f"\n### LOINC Code {i}:")
+                    log.append(f"**Code:** {code}")
+                    log.append(f"**Description:** {display}")
+
+        log.append("\n## Summary")
+        log.append("Successfully searched LOINC database")
+        log.append("Search completed using LOINC FHIR API")
+
+    except Exception as e:
+        log.append(f"Error during LOINC search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_biothings_hpo(query: str, max_results: int = 10) -> str:
+    """Search Biothings HPO (Human Phenotype Ontology) database.
+
+    Parameters
+    ----------
+    query : str
+        Search query for HPO phenotypes
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    import requests
+
+    log = []
+    log.append("# Biothings HPO Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append("")
+
+    try:
+        # Biothings HPO API
+        base_url = "https://biothings.ncats.io/hpo/query"
+
+        # Construct search parameters
+        params = {"q": query, "size": max_results, "from": 0}
+
+        log.append("## Searching Biothings HPO Database")
+        response = requests.get(base_url, params=params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search Biothings HPO. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+        hits = data.get("hits", [])
+
+        log.append(f"Found {len(hits)} HPO terms")
+
+        if not hits:
+            log.append("No HPO terms found for the query.")
+            return "\n".join(log)
+
+        log.append("\n## Search Results:")
+
+        for i, hit in enumerate(hits, 1):
+            source = hit.get("_source", {})
+            hpo_id = source.get("id", "Unknown ID")
+            name = source.get("name", "Unknown name")
+            definition = source.get("def", "No definition available")
+            synonyms = source.get("synonym", [])
+
+            log.append(f"\n### HPO Term {i}:")
+            log.append(f"**HPO ID:** {hpo_id}")
+            log.append(f"**Name:** {name}")
+            log.append(f"**Definition:** {definition}")
+            if synonyms:
+                log.append(f"**Synonyms:** {', '.join(synonyms[:3])}{'...' if len(synonyms) > 3 else ''}")
+
+        log.append("\n## Summary")
+        log.append("Successfully searched Biothings HPO database")
+        log.append("Search completed using Biothings HPO API")
+
+    except Exception as e:
+        log.append(f"Error during Biothings HPO search: {str(e)}")
+
+    return "\n".join(log)

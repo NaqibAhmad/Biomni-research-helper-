@@ -87,6 +87,285 @@ def fetch_supplementary_info_from_doi(doi: str, output_dir: str = "supplementary
     return "\n".join(research_log)
 
 
+def search_pubmed_ncbi(query: str, max_results: int = 10, sort: str = "relevance") -> str:
+    """Search PubMed using NCBI E-utilities API for biomedical literature.
+
+    Parameters
+    ----------
+    query : str
+        Search query string for PubMed
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+    sort : str, optional
+        Sort order for results (default: "relevance")
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    import xml.etree.ElementTree as ET
+
+    import requests
+
+    log = []
+    log.append("# PubMed NCBI Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append(f"Sort Order: {sort}")
+    log.append("")
+
+    try:
+        # Step 1: Search for PMIDs using esearch
+        esearch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+        esearch_params = {"db": "pubmed", "term": query, "retmax": max_results, "retmode": "xml", "sort": sort}
+
+        log.append("## Step 1: Searching for PMIDs")
+        response = requests.get(esearch_url, params=esearch_params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search PubMed. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        # Parse PMIDs from response
+        root = ET.fromstring(response.content)
+        pmids = []
+        for id_elem in root.findall(".//Id"):
+            pmids.append(id_elem.text)
+
+        log.append(f"Found {len(pmids)} PMIDs")
+
+        if not pmids:
+            log.append("No results found for the query.")
+            return "\n".join(log)
+
+        # Step 2: Get detailed information using efetch
+        log.append("\n## Step 2: Retrieving detailed information")
+        efetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+        efetch_params = {"db": "pubmed", "id": ",".join(pmids), "retmode": "xml", "rettype": "abstract"}
+
+        response = requests.get(efetch_url, params=efetch_params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to fetch details. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        # Parse detailed results
+        root = ET.fromstring(response.content)
+        articles = root.findall(".//PubmedArticle")
+
+        log.append(f"Retrieved {len(articles)} detailed articles")
+        log.append("\n## Search Results:")
+
+        for i, article in enumerate(articles, 1):
+            # Extract title
+            title_elem = article.find(".//ArticleTitle")
+            title = title_elem.text if title_elem is not None else "No title"
+
+            # Extract authors
+            authors = []
+            for author in article.findall(".//Author"):
+                last_name = author.find("LastName")
+                first_name = author.find("ForeName")
+                if last_name is not None:
+                    name = last_name.text
+                    if first_name is not None:
+                        name += f", {first_name.text}"
+                    authors.append(name)
+
+            # Extract journal
+            journal_elem = article.find(".//Journal/Title")
+            journal = journal_elem.text if journal_elem is not None else "Unknown journal"
+
+            # Extract publication date
+            pub_date = article.find(".//PubDate")
+            date_str = "Unknown date"
+            if pub_date is not None:
+                year = pub_date.find("Year")
+                month = pub_date.find("Month")
+                if year is not None:
+                    date_str = year.text
+                    if month is not None:
+                        date_str += f"-{month.text}"
+
+            # Extract PMID
+            pmid_elem = article.find(".//PMID")
+            pmid = pmid_elem.text if pmid_elem is not None else "Unknown PMID"
+
+            log.append(f"\n### Result {i}:")
+            log.append(f"**Title:** {title}")
+            log.append(f"**Authors:** {', '.join(authors[:3])}{'...' if len(authors) > 3 else ''}")
+            log.append(f"**Journal:** {journal}")
+            log.append(f"**Date:** {date_str}")
+            log.append(f"**PMID:** {pmid}")
+
+        log.append("\n## Summary")
+        log.append(f"Successfully retrieved {len(articles)} articles from PubMed")
+        log.append("Search completed using NCBI E-utilities API")
+
+    except Exception as e:
+        log.append(f"Error during PubMed search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_europe_pmc(query: str, max_results: int = 10, sort: str = "relevance") -> str:
+    """Search Europe PMC for European biomedical literature.
+
+    Parameters
+    ----------
+    query : str
+        Search query string for Europe PMC
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+    sort : str, optional
+        Sort order for results (default: "relevance")
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    import requests
+
+    log = []
+    log.append("# Europe PMC Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append(f"Sort Order: {sort}")
+    log.append("")
+
+    try:
+        # Europe PMC REST API
+        base_url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+        params = {"query": query, "resultType": "core", "pageSize": max_results, "sortBy": sort, "format": "json"}
+
+        log.append("## Searching Europe PMC")
+        response = requests.get(base_url, params=params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search Europe PMC. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+        articles = data.get("resultList", {}).get("result", [])
+
+        log.append(f"Found {len(articles)} articles")
+
+        if not articles:
+            log.append("No results found for the query.")
+            return "\n".join(log)
+
+        log.append("\n## Search Results:")
+
+        for i, article in enumerate(articles, 1):
+            title = article.get("title", "No title")
+            authors = article.get("authorString", "Unknown authors")
+            journal = article.get("journalTitle", "Unknown journal")
+            pub_year = article.get("pubYear", "Unknown year")
+            pmid = article.get("pmid", "No PMID")
+            doi = article.get("doi", "No DOI")
+
+            log.append(f"\n### Result {i}:")
+            log.append(f"**Title:** {title}")
+            log.append(f"**Authors:** {authors}")
+            log.append(f"**Journal:** {journal}")
+            log.append(f"**Year:** {pub_year}")
+            log.append(f"**PMID:** {pmid}")
+            log.append(f"**DOI:** {doi}")
+
+        log.append("\n## Summary")
+        log.append(f"Successfully retrieved {len(articles)} articles from Europe PMC")
+        log.append("Search completed using Europe PMC REST API")
+
+    except Exception as e:
+        log.append(f"Error during Europe PMC search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_nih_reporter(query: str, max_results: int = 10) -> str:
+    """Search NIH Reporter for funded research projects.
+
+    Parameters
+    ----------
+    query : str
+        Search query for NIH Reporter
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    import requests
+
+    log = []
+    log.append("# NIH Reporter Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append("")
+
+    try:
+        # NIH Reporter API
+        base_url = "https://api.reporter.nih.gov/v2/projects/search"
+
+        # Construct search payload
+        search_payload = {
+            "criteria": {"search_text": query, "search_field": "all"},
+            "offset": 0,
+            "limit": max_results,
+            "sort_field": "project_start_date",
+            "sort_order": "desc",
+        }
+
+        log.append("## Searching NIH Reporter")
+        response = requests.post(base_url, json=search_payload)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search NIH Reporter. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+        projects = data.get("results", [])
+
+        log.append(f"Found {len(projects)} projects")
+
+        if not projects:
+            log.append("No results found for the query.")
+            return "\n".join(log)
+
+        log.append("\n## Search Results:")
+
+        for i, project in enumerate(projects, 1):
+            title = project.get("project_title", "No title")
+            pi_name = project.get("contact_pi_name", "Unknown PI")
+            org_name = project.get("org_name", "Unknown organization")
+            project_start = project.get("project_start_date", "Unknown start date")
+            project_end = project.get("project_end_date", "Unknown end date")
+            total_cost = project.get("total_cost", "Unknown cost")
+            project_num = project.get("project_num", "Unknown project number")
+
+            log.append(f"\n### Project {i}:")
+            log.append(f"**Title:** {title}")
+            log.append(f"**Principal Investigator:** {pi_name}")
+            log.append(f"**Organization:** {org_name}")
+            log.append(f"**Project Number:** {project_num}")
+            log.append(f"**Start Date:** {project_start}")
+            log.append(f"**End Date:** {project_end}")
+            log.append(f"**Total Cost:** ${total_cost}")
+
+        log.append("\n## Summary")
+        log.append(f"Successfully retrieved {len(projects)} projects from NIH Reporter")
+        log.append("Search completed using NIH Reporter API v2")
+
+    except Exception as e:
+        log.append(f"Error during NIH Reporter search: {str(e)}")
+
+    return "\n".join(log)
+
+
 def query_arxiv(query: str, max_papers: int = 10) -> str:
     """Query arXiv for papers based on the provided search query.
 

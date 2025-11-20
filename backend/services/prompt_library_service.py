@@ -5,10 +5,11 @@ Manages user-created prompt templates with tool bindings and model configuration
 Simple, focused service for personal prompt management.
 """
 
+import logging
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 try:
@@ -16,6 +17,19 @@ try:
 except ImportError:
     Client = None
     create_client = None
+
+try:
+    from backend.utils.user_utils import ensure_user_exists, ensure_session_exists
+except ImportError:
+    # Fallback if utils not available
+    def ensure_user_exists(client, user_id: str) -> bool:
+        return False
+
+    def ensure_session_exists(client, session_id: str) -> bool:
+        return False
+
+
+logger = logging.getLogger(__name__)
 
 
 class PromptLibraryService:
@@ -79,6 +93,18 @@ class PromptLibraryService:
         Returns:
             Created prompt data
         """
+        # Don't allow anonymous users to create prompts (database expects UUID)
+        if created_by is None or created_by == "anonymous":
+            raise ValueError("Anonymous users cannot create prompts. Please authenticate.")
+
+        # Ensure user exists in public.users before creating prompt
+        if not ensure_user_exists(self.client, created_by):
+            raise ValueError(
+                f"User {created_by} not found in public.users. "
+                f"Cannot create prompt due to foreign key constraint. "
+                f"Please ensure you are properly authenticated."
+            )
+
         prompt_data = {
             "title": title,
             "prompt_template": prompt_template,
@@ -200,28 +226,88 @@ class PromptLibraryService:
         Returns:
             List of user's prompt data
         """
-        query = self.client.table("prompt_library").select("*").eq("is_active", True).eq("created_by", user_id)
+        # For authenticated users, we need to query for prompts where:
+        # 1. created_by = user_id (user's own prompts)
+        # 2. created_by IS NULL (prompts created before user setup or with NULL created_by)
+        # Since Supabase Python client doesn't easily support OR with IS NULL, we'll make two queries and combine
+
+        if user_id is None or user_id == "anonymous":
+            # Anonymous users only see prompts with NULL created_by
+            query = self.client.table("prompt_library").select("*").eq("is_active", True).is_("created_by", "null")
 
         # Apply filters
         if category:
             query = query.eq("category", category)
 
         if tags:
-            # Filter prompts that have any of the specified tags
             query = query.contains("tags", tags)
 
         if search_query:
-            # Search in title and description using ilike
             query = query.or_(f"title.ilike.%{search_query}%,description.ilike.%{search_query}%")
 
-        # Apply ordering
-        query = query.order(order_by, desc=descending)
+            query = query.order(order_by, desc=descending).limit(limit).range(offset, offset + limit - 1)
+            result = query.execute()
+            return result.data or []
+        else:
+            # Authenticated users: fetch prompts where created_by = user_id OR created_by IS NULL
+            logger.info(f"Querying prompts for user {user_id} (including NULL created_by prompts)")
 
-        # Apply pagination
-        query = query.limit(limit).range(offset, offset + limit - 1)
+            # Build base query for user's own prompts
+            user_query = self.client.table("prompt_library").select("*").eq("is_active", True).eq("created_by", user_id)
 
-        result = query.execute()
-        return result.data or []
+            # Build query for NULL created_by prompts
+            null_query = self.client.table("prompt_library").select("*").eq("is_active", True).is_("created_by", "null")
+
+            # Apply filters to both queries
+            if category:
+                user_query = user_query.eq("category", category)
+                null_query = null_query.eq("category", category)
+
+            if tags:
+                user_query = user_query.contains("tags", tags)
+                null_query = null_query.contains("tags", tags)
+
+            if search_query:
+                user_query = user_query.or_(f"title.ilike.%{search_query}%,description.ilike.%{search_query}%")
+                null_query = null_query.or_(f"title.ilike.%{search_query}%,description.ilike.%{search_query}%")
+
+            # Execute both queries
+            user_result = user_query.execute()
+            null_result = null_query.execute()
+
+            # Combine results
+            user_prompts = user_result.data or []
+            null_prompts = null_result.data or []
+
+            # Combine and deduplicate by ID
+            all_prompts = {}
+            for prompt in user_prompts + null_prompts:
+                all_prompts[prompt.get("id")] = prompt
+
+            # Convert back to list and sort
+            combined_prompts = list(all_prompts.values())
+
+            # Sort by order_by field
+            reverse = descending
+            if order_by == "created_at":
+                combined_prompts.sort(key=lambda x: x.get("created_at", ""), reverse=reverse)
+            elif order_by == "updated_at":
+                combined_prompts.sort(key=lambda x: x.get("updated_at", ""), reverse=reverse)
+            elif order_by == "title":
+                combined_prompts.sort(key=lambda x: x.get("title", ""), reverse=reverse)
+
+            # Apply pagination
+            paginated_prompts = combined_prompts[offset : offset + limit]
+
+            logger.info(
+                f"Found {len(user_prompts)} user prompts and {len(null_prompts)} NULL prompts. Total: {len(paginated_prompts)} after pagination"
+            )
+            if paginated_prompts:
+                logger.debug(f"Prompt IDs found: {[p.get('id') for p in paginated_prompts]}")
+                created_by_values = [p.get("created_by") for p in paginated_prompts]
+                logger.debug(f"Created_by values in results: {created_by_values}")
+
+            return paginated_prompts
 
     async def get_user_prompts(self, user_id: str) -> list[dict[str, Any]]:
         """
@@ -233,14 +319,15 @@ class PromptLibraryService:
         Returns:
             List of user's prompts
         """
-        result = (
-            self.client.table("prompt_library")
-            .select("*")
-            .eq("created_by", user_id)
-            .eq("is_active", True)
-            .order("created_at", desc=True)
-            .execute()
-        )
+        query = self.client.table("prompt_library").select("*")
+
+        # Handle NULL user_id or "anonymous" string (database expects UUID, not string)
+        if user_id is None or user_id == "anonymous":
+            query = query.is_("created_by", "null")
+        else:
+            query = query.eq("created_by", user_id)
+
+        result = query.eq("is_active", True).order("created_at", desc=True).execute()
         return result.data or []
 
     # ==================== PROMPT EXECUTION ====================
@@ -263,10 +350,46 @@ class PromptLibraryService:
         template = prompt.get("prompt_template", "")
         variables = variables or {}
 
-        # Simple variable substitution using {variable_name} format
+        # Variable substitution using {variable_name} format
+        # Replace ALL occurrences of each variable
         rendered = template
+
+        if variables:
+            logger.info(f"Rendering prompt {prompt_id} with {len(variables)} variables: {list(variables.keys())}")
+
         for var_name, var_value in variables.items():
-            rendered = rendered.replace(f"{{{var_name}}}", str(var_value))
+            if var_value is None or var_value == "":
+                logger.warning(f"Variable '{var_name}' has empty value, skipping substitution")
+                continue
+
+            # Escape special regex characters in variable name for safe replacement
+            # But use simple string replacement for exact matching
+            placeholder = f"{{{var_name}}}"
+            replacement = str(var_value)
+
+            # Count occurrences before replacement
+            count_before = rendered.count(placeholder)
+
+            # Replace all occurrences (str.replace replaces all by default)
+            rendered = rendered.replace(placeholder, replacement)
+
+            # Count occurrences after replacement
+            count_after = rendered.count(placeholder)
+
+            if count_before > 0:
+                logger.info(f"Replaced {count_before} occurrence(s) of '{placeholder}' with '{replacement[:50]}...'")
+            elif count_before == 0 and var_name in template:
+                logger.warning(f"Variable '{var_name}' defined but placeholder '{placeholder}' not found in template")
+
+            # Check for any remaining placeholders
+            import re
+
+            remaining_placeholders = re.findall(r"\{([^}]+)\}", rendered)
+            if remaining_placeholders:
+                logger.warning(f"Template still contains unsubstituted placeholders: {remaining_placeholders}")
+
+        logger.debug(f"Template (first 300 chars): {template[:300]}")
+        logger.debug(f"Rendered (first 300 chars): {rendered[:300]}")
 
         return rendered
 
@@ -277,7 +400,7 @@ class PromptLibraryService:
         variables: dict[str, Any] = None,
         session_id: str = None,
         override_model_config: dict[str, Any] = None,
-    ) -> str:
+    ) -> str | None:
         """
         Execute a prompt template and log the execution.
 
@@ -301,19 +424,39 @@ class PromptLibraryService:
         # Get model config (use override if provided)
         model_config = override_model_config or prompt.get("model_config", {})
 
-        # Log the execution
+        # Log the execution (skip for anonymous users since database expects UUID)
+        execution_id = None
+        if user_id and user_id != "anonymous":
+            # Validate user exists (required for authenticated users)
+            if not ensure_user_exists(self.client, user_id):
+                raise ValueError(
+                    f"User {user_id} not found in public.users. "
+                    f"Cannot log execution. Please ensure you are properly authenticated."
+                )
+
         execution_data = {
             "prompt_id": prompt_id,
             "user_id": user_id,
-            "session_id": session_id,
             "variables_used": variables or {},
             "rendered_prompt": rendered_prompt,
             "model_used": model_config.get("model"),
             "created_at": datetime.now().isoformat(),
         }
 
-        result = self.client.table("prompt_executions").insert(execution_data).execute()
-        execution_id = result.data[0]["id"] if result.data else None
+        # Validate session exists if provided
+        if session_id:
+            if not ensure_session_exists(self.client, session_id):
+                raise ValueError(
+                    f"Session {session_id} not found in database. Cannot log execution with invalid session."
+                )
+            execution_data["session_id"] = session_id
+
+            try:
+                result = self.client.table("prompt_executions").insert(execution_data).execute()
+                execution_id = result.data[0]["id"] if result.data else None
+            except Exception as e:
+                logger.error(f"Error logging prompt execution: {e}")
+                raise
 
         return execution_id
 
@@ -363,6 +506,18 @@ class PromptLibraryService:
 
     async def add_favorite(self, user_id: str, prompt_id: str) -> dict[str, Any]:
         """Add a prompt to user's favorites."""
+        # Don't allow anonymous users to add favorites (database expects UUID)
+        if user_id is None or user_id == "anonymous":
+            raise ValueError("Anonymous users cannot add favorites. Please authenticate.")
+
+        # Ensure user exists in public.users before adding favorite
+        if not ensure_user_exists(self.client, user_id):
+            raise ValueError(
+                f"User {user_id} not found in public.users. "
+                f"Cannot add favorite due to foreign key constraint. "
+                f"Please ensure you are properly authenticated."
+            )
+
         favorite_data = {
             "user_id": user_id,
             "prompt_id": prompt_id,
@@ -373,15 +528,25 @@ class PromptLibraryService:
 
     async def remove_favorite(self, user_id: str, prompt_id: str) -> bool:
         """Remove a prompt from user's favorites."""
-        result = (
-            self.client.table("prompt_favorites").delete().eq("user_id", user_id).eq("prompt_id", prompt_id).execute()
-        )
+        # Don't allow anonymous users to remove favorites
+        if user_id is None or user_id == "anonymous":
+            raise ValueError("Anonymous users cannot remove favorites. Please authenticate.")
+
+        query = self.client.table("prompt_favorites").delete()
+        query = query.eq("user_id", user_id)
+        result = query.eq("prompt_id", prompt_id).execute()
         return len(result.data) > 0
 
     async def get_user_favorites(self, user_id: str) -> list[dict[str, Any]]:
         """Get all prompts favorited by a user."""
+        # Anonymous users have no favorites (database expects UUID)
+        if user_id is None or user_id == "anonymous":
+            return []
+
         # Get favorite IDs
-        favorites = self.client.table("prompt_favorites").select("prompt_id").eq("user_id", user_id).execute()
+        query = self.client.table("prompt_favorites").select("prompt_id")
+        query = query.eq("user_id", user_id)
+        favorites = query.execute()
 
         if not favorites.data:
             return []
@@ -468,16 +633,29 @@ class PromptLibraryService:
 
     async def get_user_prompt_stats(self, user_id: str) -> dict[str, Any]:
         """Get basic prompt statistics for a user."""
+        # Anonymous users have no stats (database expects UUID)
+        if user_id is None or user_id == "anonymous":
+            return {
+                "user_id": user_id,
+                "total_prompts": 0,
+                "total_executions": 0,
+                "total_favorites": 0,
+            }
+
         # Get total prompts
         prompts = await self.get_user_prompts(user_id)
         total_prompts = len(prompts)
 
         # Get total executions
-        executions = self.client.table("prompt_executions").select("id", count="exact").eq("user_id", user_id).execute()
+        exec_query = self.client.table("prompt_executions").select("id", count="exact")
+        exec_query = exec_query.eq("user_id", user_id)
+        executions = exec_query.execute()
         total_executions = len(executions.data) if executions.data else 0
 
         # Get favorites
-        favorites = self.client.table("prompt_favorites").select("id", count="exact").eq("user_id", user_id).execute()
+        fav_query = self.client.table("prompt_favorites").select("id", count="exact")
+        fav_query = fav_query.eq("user_id", user_id)
+        favorites = fav_query.execute()
         total_favorites = len(favorites.data) if favorites.data else 0
 
         return {

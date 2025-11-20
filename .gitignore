@@ -233,3 +233,8 @@ data/ddinter_raw/
 
 # tests
 tests/
+
+generated_tables/
+generated_images/
+
+migrations/

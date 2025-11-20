@@ -31,7 +31,7 @@ class BiomniConfig:
 
     # Data and execution settings
     path: str = "./data"
-    timeout_seconds: int = 600
+    timeout_seconds: int = 1200  # Default to 20 minutes for longer-running prompts
 
     # LLM settings (API keys still from environment)
     # Supported models: gpt-5, gpt-4, gpt-4-turbo, claude-sonnet-4-20250514, claude-3-5-sonnet-20241022, etc.

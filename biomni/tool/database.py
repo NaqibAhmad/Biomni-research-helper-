@@ -3963,3 +3963,638 @@ def query_emdb(
         api_result["result"] = _format_query_results(api_result["result"])
 
     return api_result
+
+
+def search_pubchem(query: str, max_results: int = 10, search_type: str = "compound") -> str:
+    """Search PubChem database for chemical compounds using PUG REST API.
+
+    Parameters
+    ----------
+    query : str
+        Search query for PubChem (compound name, CID, etc.)
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+    search_type : str, optional
+        Search type: compound, substance, or assay (default: "compound")
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    log = []
+    log.append("# PubChem Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append(f"Search Type: {search_type}")
+    log.append("")
+
+    try:
+        # PubChem PUG REST API - Fixed endpoint
+        if search_type == "compound":
+            # Use compound name search endpoint
+            base_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{query}/property/MolecularFormula,MolecularWeight,IUPACName,CanonicalSMILES/JSON"
+        else:
+            # Use general search endpoint
+            base_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/{search_type}/search"
+
+        log.append("## Searching PubChem")
+
+        if search_type == "compound":
+            # For compound search, use the direct name endpoint
+            response = requests.get(base_url)
+        else:
+            # For other search types, use the search endpoint with parameters
+            params = {"query": query, "maxresults": max_results, "output": "json"}
+            response = requests.get(base_url, params=params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search PubChem. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+
+        # Parse results based on search type
+        if search_type == "compound":
+            # Handle compound name search response
+            if "PropertyTable" in data and "Properties" in data["PropertyTable"]:
+                properties = data["PropertyTable"]["Properties"]
+                log.append(f"Found {len(properties)} compound(s)")
+
+                if not properties:
+                    log.append("No compounds found for the query.")
+                    return "\n".join(log)
+
+                log.append("\n## Search Results:")
+
+                for i, prop in enumerate(properties, 1):
+                    cid = prop.get("CID", "Unknown CID")
+                    molecular_formula = prop.get("MolecularFormula", "Unknown formula")
+                    molecular_weight = prop.get("MolecularWeight", "Unknown weight")
+                    iupac_name = prop.get("IUPACName", "Unknown name")
+                    smiles = prop.get("CanonicalSMILES", "Unknown SMILES")
+
+                    log.append(f"\n### Compound {i}:")
+                    log.append(f"**CID:** {cid}")
+                    log.append(f"**IUPAC Name:** {iupac_name}")
+                    log.append(f"**Molecular Formula:** {molecular_formula}")
+                    log.append(f"**Molecular Weight:** {molecular_weight}")
+                    log.append(f"**SMILES:** {smiles}")
+            else:
+                log.append("No compound data found in response.")
+                return "\n".join(log)
+
+        else:
+            # For substance or assay searches
+            results = data.get("results", [])
+            log.append(f"Found {len(results)} results")
+
+            if not results:
+                log.append("No results found for the query.")
+                return "\n".join(log)
+
+            log.append("\n## Search Results:")
+
+            for i, result in enumerate(results, 1):
+                log.append(f"\n### Result {i}:")
+                log.append(f"**Data:** {str(result)[:200]}...")
+
+        log.append("\n## Summary")
+        log.append(f"Successfully searched PubChem {search_type} database")
+        log.append("Search completed using PubChem PUG REST API")
+
+    except Exception as e:
+        log.append(f"Error during PubChem search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_chembl(query: str, max_results: int = 10, search_type: str = "molecule") -> str:
+    """Search ChEMBL database for bioactive molecules and drug targets.
+
+    Parameters
+    ----------
+    query : str
+        Search query for ChEMBL (molecule name, ChEMBL ID, etc.)
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+    search_type : str, optional
+        Search type: molecule, target, or activity (default: "molecule")
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    log = []
+    log.append("# ChEMBL Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append(f"Search Type: {search_type}")
+    log.append("")
+
+    try:
+        # ChEMBL REST API
+        if search_type == "molecule":
+            base_url = "https://www.ebi.ac.uk/chembl/api/data/molecule/search"
+        elif search_type == "target":
+            base_url = "https://www.ebi.ac.uk/chembl/api/data/target/search"
+        else:  # activity
+            base_url = "https://www.ebi.ac.uk/chembl/api/data/activity/search"
+
+        params = {"q": query, "limit": max_results, "format": "json"}
+
+        log.append(f"## Searching ChEMBL {search_type}")
+        response = requests.get(base_url, params=params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search ChEMBL. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+        results = (
+            data.get("molecules", [])
+            if search_type == "molecule"
+            else data.get("targets", [])
+            if search_type == "target"
+            else data.get("activities", [])
+        )
+
+        log.append(f"Found {len(results)} {search_type}s")
+
+        if not results:
+            log.append(f"No {search_type}s found for the query.")
+            return "\n".join(log)
+
+        log.append("\n## Search Results:")
+
+        for i, result in enumerate(results, 1):
+            if search_type == "molecule":
+                molecule_id = result.get("molecule_chembl_id", "Unknown ID")
+                name = result.get("pref_name", "Unknown name")
+                max_phase = result.get("max_phase", "Unknown phase")
+                molecule_type = result.get("molecule_type", "Unknown type")
+
+                log.append(f"\n### Molecule {i}:")
+                log.append(f"**ChEMBL ID:** {molecule_id}")
+                log.append(f"**Name:** {name}")
+                log.append(f"**Max Phase:** {max_phase}")
+                log.append(f"**Type:** {molecule_type}")
+
+            elif search_type == "target":
+                target_id = result.get("target_chembl_id", "Unknown ID")
+                name = result.get("pref_name", "Unknown name")
+                organism = result.get("organism", "Unknown organism")
+                target_type = result.get("target_type", "Unknown type")
+
+                log.append(f"\n### Target {i}:")
+                log.append(f"**ChEMBL ID:** {target_id}")
+                log.append(f"**Name:** {name}")
+                log.append(f"**Organism:** {organism}")
+                log.append(f"**Type:** {target_type}")
+
+            else:  # activity
+                activity_id = result.get("activity_id", "Unknown ID")
+                assay_id = result.get("assay_chembl_id", "Unknown assay")
+                molecule_id = result.get("molecule_chembl_id", "Unknown molecule")
+                value = result.get("standard_value", "Unknown value")
+                units = result.get("standard_units", "Unknown units")
+
+                log.append(f"\n### Activity {i}:")
+                log.append(f"**Activity ID:** {activity_id}")
+                log.append(f"**Assay ID:** {assay_id}")
+                log.append(f"**Molecule ID:** {molecule_id}")
+                log.append(f"**Value:** {value} {units}")
+
+        log.append("\n## Summary")
+        log.append(f"Successfully searched ChEMBL {search_type} database")
+        log.append("Search completed using ChEMBL REST API")
+
+    except Exception as e:
+        log.append(f"Error during ChEMBL search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_clinicaltrials_gov(query: str, max_results: int = 10, status: str = None) -> str:
+    """Search ClinicalTrials.gov for clinical trials using API v2.
+
+    Parameters
+    ----------
+    query : str
+        Search query for clinical trials
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+    status : str, optional
+        Trial status filter (e.g., RECRUITING, COMPLETED)
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    log = []
+    log.append("# ClinicalTrials.gov Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    if status:
+        log.append(f"Status Filter: {status}")
+    log.append("")
+
+    try:
+        # ClinicalTrials.gov API - Try multiple approaches
+        log.append("## Searching ClinicalTrials.gov")
+
+        # Try API v1 first (simpler)
+        base_url_v1 = "https://clinicaltrials.gov/api/query/study_fields"
+        params_v1 = {
+            "expr": query,
+            "fields": "NCTId,BriefTitle,OfficialTitle,OverallStatus,Phase,StartDate,CompletionDate,LeadSponsorName",
+            "min_rnk": 1,
+            "max_rnk": max_results,
+            "fmt": "json",
+        }
+
+        log.append("Trying ClinicalTrials.gov API v1...")
+        response = requests.get(base_url_v1, params=params_v1, timeout=30)
+
+        if response.status_code != 200:
+            # Try API v2 with simpler parameters
+            log.append("API v1 failed, trying API v2 with simpler parameters...")
+            base_url_v2 = "https://clinicaltrials.gov/api/v2/studies"
+            params_v2 = {"query.term": query, "pageSize": max_results}
+            response = requests.get(base_url_v2, params=params_v2, timeout=30)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search ClinicalTrials.gov. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+
+        # Handle different API response formats
+        if "StudyFieldsResponse" in data:
+            # API v1 format
+            studies = data.get("StudyFieldsResponse", {}).get("StudyFields", [])
+            log.append(f"Found {len(studies)} studies (API v1)")
+        else:
+            # API v2 format
+            studies = data.get("studies", [])
+            log.append(f"Found {len(studies)} studies (API v2)")
+
+        if not studies:
+            log.append("No studies found for the query.")
+            return "\n".join(log)
+
+        log.append("\n## Search Results:")
+
+        for i, study in enumerate(studies, 1):
+            if "StudyFieldsResponse" in data:
+                # API v1 format
+                nct_id = (
+                    study.get("NCTId", ["Unknown NCT ID"])[0]
+                    if isinstance(study.get("NCTId"), list)
+                    else study.get("NCTId", "Unknown NCT ID")
+                )
+                title = (
+                    study.get("BriefTitle", ["Unknown title"])[0]
+                    if isinstance(study.get("BriefTitle"), list)
+                    else study.get("BriefTitle", "Unknown title")
+                )
+                official_title = (
+                    study.get("OfficialTitle", ["Unknown official title"])[0]
+                    if isinstance(study.get("OfficialTitle"), list)
+                    else study.get("OfficialTitle", "Unknown official title")
+                )
+                overall_status = (
+                    study.get("OverallStatus", ["Unknown status"])[0]
+                    if isinstance(study.get("OverallStatus"), list)
+                    else study.get("OverallStatus", "Unknown status")
+                )
+                phase = (
+                    study.get("Phase", ["Unknown phase"])[0]
+                    if isinstance(study.get("Phase"), list)
+                    else study.get("Phase", "Unknown phase")
+                )
+                lead_sponsor = (
+                    study.get("LeadSponsorName", ["Unknown sponsor"])[0]
+                    if isinstance(study.get("LeadSponsorName"), list)
+                    else study.get("LeadSponsorName", "Unknown sponsor")
+                )
+
+                log.append(f"\n### Study {i}:")
+                log.append(f"**NCT ID:** {nct_id}")
+                log.append(f"**Title:** {title}")
+                log.append(f"**Official Title:** {official_title}")
+                log.append(f"**Status:** {overall_status}")
+                log.append(f"**Phase:** {phase}")
+                log.append(f"**Lead Sponsor:** {lead_sponsor}")
+            else:
+                # API v2 format
+                protocol_section = study.get("protocolSection", {})
+                identification_module = protocol_section.get("identificationModule", {})
+                status_module = protocol_section.get("statusModule", {})
+
+                nct_id = identification_module.get("nctId", "Unknown NCT ID")
+                title = identification_module.get("briefTitle", "Unknown title")
+                official_title = identification_module.get("officialTitle", "Unknown official title")
+                overall_status = status_module.get("overallStatus", "Unknown status")
+                phase = status_module.get("phase", "Unknown phase")
+
+                log.append(f"\n### Study {i}:")
+                log.append(f"**NCT ID:** {nct_id}")
+                log.append(f"**Title:** {title}")
+                log.append(f"**Official Title:** {official_title}")
+                log.append(f"**Status:** {overall_status}")
+                log.append(f"**Phase:** {phase}")
+
+        log.append("\n## Summary")
+        log.append(f"Successfully retrieved {len(studies)} studies from ClinicalTrials.gov")
+        log.append("Search completed using ClinicalTrials.gov API v2")
+
+    except Exception as e:
+        log.append(f"Error during ClinicalTrials.gov search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_openfda(query: str, max_results: int = 10, search_type: str = "drug") -> str:
+    """Search OpenFDA database for drug and device information.
+
+    Parameters
+    ----------
+    query : str
+        Search query for OpenFDA
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+    search_type : str, optional
+        Search type: drug, device, or food (default: "drug")
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    log = []
+    log.append("# OpenFDA Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append(f"Search Type: {search_type}")
+    log.append("")
+
+    try:
+        # OpenFDA API
+        base_url = f"https://api.fda.gov/{search_type}/event.json"
+
+        params = {"search": query, "limit": max_results}
+
+        log.append(f"## Searching OpenFDA {search_type}")
+        response = requests.get(base_url, params=params)
+
+        if response.status_code != 200:
+            log.append(f"Error: Failed to search OpenFDA. Status code: {response.status_code}")
+            return "\n".join(log)
+
+        data = response.json()
+        results = data.get("results", [])
+
+        log.append(f"Found {len(results)} {search_type} events")
+
+        if not results:
+            log.append(f"No {search_type} events found for the query.")
+            return "\n".join(log)
+
+        log.append("\n## Search Results:")
+
+        for i, result in enumerate(results, 1):
+            log.append(f"\n### {search_type.title()} Event {i}:")
+
+            # Extract common fields
+            if "receivedate" in result:
+                log.append(f"**Receive Date:** {result['receivedate']}")
+            if "companynumb" in result:
+                log.append(f"**Company Number:** {result['companynumb']}")
+            if "patient" in result:
+                patient = result["patient"]
+                if "patientonsetage" in patient:
+                    log.append(f"**Patient Age:** {patient['patientonsetage']}")
+                if "patientsex" in patient:
+                    log.append(f"**Patient Sex:** {patient['patientsex']}")
+
+            # Extract drug-specific information
+            if search_type == "drug" and "drug" in result:
+                drugs = result["drug"]
+                if isinstance(drugs, list) and len(drugs) > 0:
+                    drug = drugs[0]
+                    if "medicinalproduct" in drug:
+                        log.append(f"**Medicinal Product:** {drug['medicinalproduct']}")
+                    if "drugdosagetext" in drug:
+                        log.append(f"**Dosage:** {drug['drugdosagetext']}")
+
+        log.append("\n## Summary")
+        log.append(f"Successfully searched OpenFDA {search_type} database")
+        log.append("Search completed using OpenFDA API")
+
+    except Exception as e:
+        log.append(f"Error during OpenFDA search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_cms(query: str, max_results: int = 10) -> str:
+    """Search CMS (Centers for Medicare & Medicaid Services) database.
+
+    Parameters
+    ----------
+    query : str
+        Search query for CMS database
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    log = []
+    log.append("# CMS Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append("")
+
+    try:
+        # CMS Data API - Implement real API calls
+        # Using CMS Provider Data API as an example
+        base_url = "https://data.cms.gov/provider-data/api/1/datastore/query"
+
+        # Construct search parameters
+        params = {"q": query, "limit": max_results, "offset": 0, "sort": "provider_name"}
+
+        log.append("## Searching CMS Database")
+
+        # Try multiple CMS endpoints
+        cms_endpoints = [
+            "https://data.cms.gov/provider-data/api/1/datastore/query",
+            "https://data.cms.gov/api/1/datastore/query",
+            "https://data.cms.gov/api/1/metastore/schemas/dataset",
+        ]
+
+        success = False
+        for endpoint in cms_endpoints:
+            try:
+                log.append(f"Trying endpoint: {endpoint}")
+                response = requests.get(endpoint, params=params, timeout=30)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    log.append("Successfully connected to CMS API")
+
+                    # Parse results based on response structure
+                    if "results" in data:
+                        results = data["results"]
+                        log.append(f"Found {len(results)} results")
+
+                        if results:
+                            log.append("\n## Search Results:")
+                            for i, result in enumerate(results[:max_results], 1):
+                                log.append(f"\n### Result {i}:")
+                                # Display key fields from CMS data
+                                for key, value in list(result.items())[:5]:  # Show first 5 fields
+                                    log.append(f"**{key}:** {value}")
+                        else:
+                            log.append("No results found for the query.")
+                    else:
+                        log.append("No results structure found in response.")
+                        log.append(f"Response structure: {list(data.keys())}")
+
+                    success = True
+                    break
+
+            except Exception as e:
+                log.append(f"Error with endpoint {endpoint}: {str(e)}")
+                continue
+
+        if not success:
+            log.append("All CMS endpoints failed. Using fallback information.")
+            log.append(f"Searching for: {query}")
+            log.append("CMS database contains Medicare, Medicaid, and other healthcare data")
+            log.append("Specific dataset searches would require dataset-specific endpoints")
+
+        log.append("\n## Summary")
+        log.append("Search completed for CMS database")
+        if success:
+            log.append("Search completed using CMS Data API")
+        else:
+            log.append("Note: Full implementation would require specific dataset endpoints")
+
+    except Exception as e:
+        log.append(f"Error during CMS search: {str(e)}")
+
+    return "\n".join(log)
+
+
+def search_icd10_cm(query: str, max_results: int = 10) -> str:
+    """Search ICD-10 CM (International Classification of Diseases) database.
+
+    Parameters
+    ----------
+    query : str
+        Search query for ICD-10 CM codes
+    max_results : int, optional
+        Maximum number of results to return (default: 10)
+
+    Returns
+    -------
+    str
+        Research log with search results
+    """
+    log = []
+    log.append("# ICD-10 CM Search Results")
+    log.append(f"Query: {query}")
+    log.append(f"Max Results: {max_results}")
+    log.append("")
+
+    try:
+        # ICD-10 CM API - Try multiple NLM endpoints
+        log.append("## Searching ICD-10 CM Database")
+
+        # Try different NLM API endpoints
+        nlm_endpoints = [
+            "https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search",
+            "https://clinicaltables.nlm.nih.gov/api/icd10cm/v2/search",
+            "https://clinicaltables.nlm.nih.gov/api/icd10cm/v1/search",
+        ]
+
+        success = False
+        for endpoint in nlm_endpoints:
+            try:
+                log.append(f"Trying endpoint: {endpoint}")
+
+                # URL encode the query and construct proper parameters
+                import urllib.parse
+
+                encoded_query = urllib.parse.quote(query)
+
+                params = {
+                    "sf": "code,name",  # search fields: code and name
+                    "df": "code,name",  # display fields: code and name
+                    "q": encoded_query,
+                    "maxList": str(max_results),
+                }
+
+                response = requests.get(endpoint, params=params, timeout=30)
+
+                if response.status_code == 200:
+                    log.append("Successfully connected to NLM API")
+                    success = True
+                    break
+                else:
+                    log.append(f"Endpoint failed with status {response.status_code}")
+
+            except Exception as e:
+                log.append(f"Error with endpoint {endpoint}: {str(e)}")
+                continue
+
+        if not success:
+            log.append("All NLM endpoints failed. Using fallback information.")
+            log.append(f"Searching for: {query}")
+            log.append("ICD-10 CM database contains disease classification codes")
+            log.append("Note: Full implementation would require working NLM API access")
+
+            log.append("\n## Summary")
+            log.append("Search completed for ICD-10 CM database")
+            log.append("Note: Full implementation would require working NLM API access")
+            return "\n".join(log)
+
+        # Parse the response (format: [0] = total count, [1] = results array)
+        data = response.json()
+
+        if len(data) >= 2:
+            total_count = data[0]
+            results = data[1]
+
+            log.append(f"Found {total_count} total codes")
+            log.append(f"Displaying {len(results)} results")
+
+            if not results:
+                log.append("No ICD-10 CM codes found for the query.")
+                return "\n".join(log)
+
+            log.append("\n## Search Results:")
+
+            for i, result in enumerate(results, 1):
+                if len(result) >= 2:
+                    code = result[0]
+                    name = result[1]
+
+                    log.append(f"\n### Code {i}:")
+                    log.append(f"**Code:** {code}")
+                    log.append(f"**Description:** {name}")
+
+        log.append("\n## Summary")
+        log.append("Successfully searched ICD-10 CM database")
+        log.append("Search completed using NLM Clinical Tables API")
+
+    except Exception as e:
+        log.append(f"Error during ICD-10 CM search: {str(e)}")
+
+    return "\n".join(log)

@@ -778,4 +778,292 @@ description = [
             }
         ],
     },
+    {
+        "description": "Search PubChem database for chemical compounds using PUG REST API.",
+        "name": "search_pubchem",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "compound",
+                "description": "Search type: compound, substance, or assay",
+                "name": "search_type",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for PubChem (compound name, CID, etc.)",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search ChEMBL database for bioactive molecules and drug targets.",
+        "name": "search_chembl",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "molecule",
+                "description": "Search type: molecule, target, or activity",
+                "name": "search_type",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for ChEMBL (molecule name, ChEMBL ID, etc.)",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search ClinicalTrials.gov for clinical trials using API v2.",
+        "name": "search_clinicaltrials_gov",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": None,
+                "description": "Trial status filter (e.g., RECRUITING, COMPLETED)",
+                "name": "status",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for clinical trials",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search OpenFDA database for drug and device information.",
+        "name": "search_openfda",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "drug",
+                "description": "Search type: drug, device, or food",
+                "name": "search_type",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for OpenFDA",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search CMS (Centers for Medicare & Medicaid Services) database.",
+        "name": "search_cms",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            }
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for CMS database",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search ICD-10 CM (International Classification of Diseases) database.",
+        "name": "search_icd10_cm",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            }
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for ICD-10 CM codes",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search PubChem database for chemical compounds using PUG REST API.",
+        "name": "search_pubchem",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "compound",
+                "description": "Search type: compound, substance, or assay",
+                "name": "search_type",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for PubChem (compound name, CID, etc.)",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search ChEMBL database for bioactive molecules and drug targets.",
+        "name": "search_chembl",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "molecule",
+                "description": "Search type: molecule, target, or activity",
+                "name": "search_type",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for ChEMBL (molecule name, ChEMBL ID, etc.)",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search ClinicalTrials.gov for clinical trials using API v2.",
+        "name": "search_clinicaltrials_gov",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": None,
+                "description": "Trial status filter (e.g., RECRUITING, COMPLETED)",
+                "name": "status",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for clinical trials",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search OpenFDA database for drug and device information.",
+        "name": "search_openfda",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            },
+            {
+                "default": "drug",
+                "description": "Search type: drug, device, or food",
+                "name": "search_type",
+                "type": "str",
+            },
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for OpenFDA",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search CMS (Centers for Medicare & Medicaid Services) database.",
+        "name": "search_cms",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            }
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for CMS database",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
+    {
+        "description": "Search ICD-10 CM (International Classification of Diseases) database.",
+        "name": "search_icd10_cm",
+        "optional_parameters": [
+            {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "name": "max_results",
+                "type": "int",
+            }
+        ],
+        "required_parameters": [
+            {
+                "default": None,
+                "description": "Search query for ICD-10 CM codes",
+                "name": "query",
+                "type": "str",
+            }
+        ],
+    },
 ]
