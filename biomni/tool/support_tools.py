@@ -23,6 +23,16 @@ def run_python_repl(command: str) -> str:
             # Execute the command in the persistent namespace
             exec(command, _persistent_namespace)
             output = mystdout.getvalue()
+        except SystemExit as e:
+            # Catch SystemExit (from sys.exit()) and convert to error message
+            # SystemExit has a code attribute that may contain the exit message
+            exit_code = e.code
+            if isinstance(exit_code, str):
+                output = f"Error: {exit_code}"
+            elif exit_code is not None and exit_code != 0:
+                output = f"Error: Process exited with code {exit_code}"
+            else:
+                output = mystdout.getvalue() or "Process exited normally"
         except Exception as e:
             output = f"Error: {str(e)}"
         finally:
@@ -50,6 +60,16 @@ async def run_python_repl_async(command: str) -> str:
             # Execute the command in the persistent namespace
             exec(command, _persistent_namespace)
             output = mystdout.getvalue()
+        except SystemExit as e:
+            # Catch SystemExit (from sys.exit()) and convert to error message
+            # SystemExit has a code attribute that may contain the exit message
+            exit_code = e.code
+            if isinstance(exit_code, str):
+                output = f"Error: {exit_code}"
+            elif exit_code is not None and exit_code != 0:
+                output = f"Error: Process exited with code {exit_code}"
+            else:
+                output = mystdout.getvalue() or "Process exited normally"
         except Exception as e:
             output = f"Error: {str(e)}"
         finally:

@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from supabase import Client, create_client
 
-from backend.utils.user_utils import ensure_user_exists
+from utils.user_utils import ensure_user_exists
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from backend.utils.user_utils import ensure_session_exists, ensure_user_exists
+from utils.user_utils import ensure_session_exists, ensure_user_exists
 from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)

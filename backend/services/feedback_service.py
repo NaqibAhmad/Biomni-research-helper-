@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from backend.utils.user_utils import ensure_user_exists, ensure_session_exists
+from utils.user_utils import ensure_user_exists, ensure_session_exists
 
 logger = logging.getLogger(__name__)
 

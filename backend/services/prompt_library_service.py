@@ -19,7 +19,7 @@ except ImportError:
     create_client = None
 
 try:
-    from backend.utils.user_utils import ensure_user_exists, ensure_session_exists
+    from utils.user_utils import ensure_user_exists, ensure_session_exists
 except ImportError:
     # Fallback if utils not available
     def ensure_user_exists(client, user_id: str) -> bool:

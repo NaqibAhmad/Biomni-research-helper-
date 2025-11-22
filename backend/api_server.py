@@ -71,7 +71,7 @@ from biomni.config import default_config
 # Import authentication middleware
 try:
     # Try absolute import first (from project root)
-    from backend.middleware.auth import get_current_user, get_optional_user
+    from middleware.auth import get_current_user, get_optional_user
 
     logger.info("Authentication middleware loaded successfully")
 except ImportError as e:
@@ -161,7 +161,7 @@ def get_prompt_library_service():
     if prompt_library_service is None:
         try:
             # Import here to avoid dependency issues if supabase is not installed
-            from backend.services.prompt_library_service import PromptLibraryService
+            from services.prompt_library_service import PromptLibraryService
 
             prompt_library_service = PromptLibraryService()
             logger.info("Prompt library service initialized")
@@ -179,7 +179,7 @@ def get_feedback_service():
     global feedback_service
     if feedback_service is None:
         try:
-            from backend.services.feedback_service import FeedbackService
+            from services.feedback_service import FeedbackService
 
             feedback_service = FeedbackService()
             logger.info("Feedback service initialized")
@@ -194,7 +194,7 @@ def get_chat_service():
     global chat_service
     if chat_service is None:
         try:
-            from backend.services.chat_service import ChatService
+            from services.chat_service import ChatService
 
             chat_service = ChatService()
             logger.info("[SERVICE] Chat service initialized successfully")
@@ -211,7 +211,7 @@ def get_file_storage_service():
     global file_storage_service
     if file_storage_service is None:
         try:
-            from backend.services.file_storage_service import FileStorageService
+            from services.file_storage_service import FileStorageService
 
             file_storage_service = FileStorageService()
             logger.info("File storage service initialized")
@@ -226,7 +226,7 @@ def get_user_settings_service():
     global user_settings_service
     if user_settings_service is None:
         try:
-            from backend.services.user_settings_service import UserSettingsService
+            from services.user_settings_service import UserSettingsService
 
             user_settings_service = UserSettingsService()
             logger.info("User settings service initialized")
@@ -241,7 +241,7 @@ def get_streaming_service():
     global streaming_service
     if streaming_service is None:
         try:
-            from backend.services.streaming_service import StreamingService
+            from services.streaming_service import StreamingService
 
             streaming_service = StreamingService()
             logger.info("Streaming service initialized")
@@ -903,7 +903,7 @@ async def chat_stream(websocket: WebSocket, session_id: str):
         # If we have a token in query params, decode it
         if token and not user_id:
             try:
-                from backend.middleware.auth import decode_jwt_token, extract_user_id_from_payload
+                from middleware.auth import decode_jwt_token, extract_user_id_from_payload
 
                 payload = decode_jwt_token(token)
                 if payload:
@@ -922,7 +922,7 @@ async def chat_stream(websocket: WebSocket, session_id: str):
             )
             if auth_header and auth_header.startswith("Bearer "):
                 try:
-                    from backend.middleware.auth import decode_jwt_token, extract_user_id_from_payload
+                    from middleware.auth import decode_jwt_token, extract_user_id_from_payload
 
                     token = auth_header.replace("Bearer ", "")
                     payload = decode_jwt_token(token)
@@ -953,7 +953,7 @@ async def chat_stream(websocket: WebSocket, session_id: str):
         try:
             # Validate user_id format (should be UUID)
             from uuid import UUID
-            from backend.utils.user_utils import ensure_user_exists
+            from utils.user_utils import ensure_user_exists
 
             UUID(user_id)  # Validate UUID format
             # Check if user exists in database
@@ -2626,4 +2626,4 @@ async def end_session(session_id: str, user_id: str = Depends(get_optional_user)
 
 if __name__ == "__main__":
     # Run the server
-    uvicorn.run("backend.api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

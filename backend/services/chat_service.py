@@ -13,7 +13,7 @@ from uuid import UUID
 
 from supabase import Client, create_client
 
-from backend.utils.user_utils import ensure_user_exists, ensure_session_exists
+from utils.user_utils import ensure_user_exists, ensure_session_exists
 
 logger = logging.getLogger(__name__)
 
