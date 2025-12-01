@@ -54,32 +54,34 @@ description = [
             }
         ],
     },
-    {
-        "description": "Query PubMed for papers based on the provided search query.",
-        "name": "query_pubmed",
-        "optional_parameters": [
-            {
-                "default": 10,
-                "description": "The maximum number of papers to retrieve.",
-                "name": "max_papers",
-                "type": "int",
-            },
-            {
-                "default": 3,
-                "description": "Maximum number of retry attempts with modified queries.",
-                "name": "max_retries",
-                "type": "int",
-            },
-        ],
-        "required_parameters": [
-            {
-                "default": None,
-                "description": "The search query string.",
-                "name": "query",
-                "type": "str",
-            }
-        ],
-    },
+    # !COMMENTED OUT: query_pubmed function disabled due to incorrect results from PyMed library
+    # Use search_pubmed_ncbi instead
+    # {
+    #     "description": "Query PubMed for papers based on the provided search query.",
+    #     "name": "query_pubmed",
+    #     "optional_parameters": [
+    #         {
+    #             "default": 10,
+    #             "description": "The maximum number of papers to retrieve.",
+    #             "name": "max_papers",
+    #             "type": "int",
+    #         },
+    #         {
+    #             "default": 3,
+    #             "description": "Maximum number of retry attempts with modified queries.",
+    #             "name": "max_retries",
+    #             "type": "int",
+    #         },
+    #     ],
+    #     "required_parameters": [
+    #         {
+    #             "default": None,
+    #             "description": "The search query string.",
+    #             "name": "query",
+    #             "type": "str",
+    #         }
+    #     ],
+    # },
     {
         "description": "Search using Google search and return formatted results.",
         "name": "search_google",

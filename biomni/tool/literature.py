@@ -192,12 +192,21 @@ def search_pubmed_ncbi(query: str, max_results: int = 10, sort: str = "relevance
             pmid_elem = article.find(".//PMID")
             pmid = pmid_elem.text if pmid_elem is not None else "Unknown PMID"
 
+            # Extract abstract
+            abstract_parts = article.findall(".//AbstractText")
+            if abstract_parts:
+                # Combine all abstract sections (some papers have structured abstracts)
+                abstract = " ".join([part.text for part in abstract_parts if part.text])
+            else:
+                abstract = "No abstract available"
+
             log.append(f"\n### Result {i}:")
             log.append(f"**Title:** {title}")
             log.append(f"**Authors:** {', '.join(authors[:3])}{'...' if len(authors) > 3 else ''}")
             log.append(f"**Journal:** {journal}")
             log.append(f"**Date:** {date_str}")
             log.append(f"**PMID:** {pmid}")
+            log.append(f"**Abstract:** {abstract}")
 
         log.append("\n## Summary")
         log.append(f"Successfully retrieved {len(articles)} articles from PubMed")
@@ -415,46 +424,49 @@ def query_scholar(query: str) -> str:
         return f"Error querying Google Scholar: {e}"
 
 
-def query_pubmed(query: str, max_papers: int = 10, max_retries: int = 3) -> str:
-    """Query PubMed for papers based on the provided search query.
-
-    Parameters
-    ----------
-    - query (str): The search query string.
-    - max_papers (int): The maximum number of papers to retrieve (default: 10).
-    - max_retries (int): Maximum number of retry attempts with modified queries (default: 3).
-
-    Returns
-    -------
-    - str: The formatted search results or an error message.
-
-    """
-    from pymed import PubMed
-
-    try:
-        pubmed = PubMed(tool="MyTool", email="your-email@example.com")  # Update with a valid email address
-
-        # Initial attempt
-        papers = list(pubmed.query(query, max_results=max_papers))
-
-        # Retry with modified queries if no results
-        retries = 0
-        while not papers and retries < max_retries:
-            retries += 1
-            # Simplify query with each retry by removing the last word
-            simplified_query = " ".join(query.split()[:-retries]) if len(query.split()) > retries else query
-            time.sleep(1)  # Add delay between requests
-            papers = list(pubmed.query(simplified_query, max_results=max_papers))
-
-        if papers:
-            results = "\n\n".join(
-                [f"Title: {paper.title}\nAbstract: {paper.abstract}\nJournal: {paper.journal}" for paper in papers]
-            )
-            return results
-        else:
-            return "No papers found on PubMed after multiple query attempts."
-    except Exception as e:
-        return f"Error querying PubMed: {e}"
+# !COMMENTED OUT: This function uses PyMed library which returns incorrect/irrelevant results
+# Use search_pubmed_ncbi() instead, which uses the official NCBI E-utilities API
+#
+# def query_pubmed(query: str, max_papers: int = 10, max_retries: int = 3) -> str:
+#     """Query PubMed for papers based on the provided search query.
+#
+#     Parameters
+#     ----------
+#     - query (str): The search query string.
+#     - max_papers (int): The maximum number of papers to retrieve (default: 10).
+#     - max_retries (int): Maximum number of retry attempts with modified queries (default: 3).
+#
+#     Returns
+#     -------
+#     - str: The formatted search results or an error message.
+#
+#     """
+#     from pymed import PubMed
+#
+#     try:
+#         pubmed = PubMed(tool="MyTool", email="mmahmood.dev@gmail.com")  # Update with a valid email address
+#
+#         # Initial attempt
+#         papers = list(pubmed.query(query, max_results=max_papers))
+#
+#         # Retry with modified queries if no results
+#         retries = 0
+#         while not papers and retries < max_retries:
+#             retries += 1
+#             # Simplify query with each retry by removing the last word
+#             simplified_query = " ".join(query.split()[:-retries]) if len(query.split()) > retries else query
+#             time.sleep(1)  # Add delay between requests
+#             papers = list(pubmed.query(simplified_query, max_results=max_papers))
+#
+#         if papers:
+#             results = "\n\n".join(
+#                 [f"Title: {paper.title}\nAbstract: {paper.abstract}\nJournal: {paper.journal}" for paper in papers]
+#             )
+#             return results
+#         else:
+#             return "No papers found on PubMed after multiple query attempts."
+#     except Exception as e:
+#         return f"Error querying PubMed: {e}"
 
 
 def search_google(query: str, num_results: int = 3, language: str = "en") -> list[dict]:
